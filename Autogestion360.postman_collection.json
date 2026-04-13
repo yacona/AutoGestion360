@@ -1,0 +1,360 @@
+{
+  "info": {
+    "name": "Autogestion360 Backend",
+    "_postman_id": "f4f5b5b0-0000-0000-0000-autogestion360",
+    "description": "Colección de pruebas para el backend de AutoGestión360 (auth, clientes, vehículos).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Ping",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/ping",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "ping"
+              ]
+            },
+            "description": "Verifica que el backend de AutoGestión360 esté arriba."
+          },
+          "response": []
+        },
+        {
+          "name": "Setup Demo (una vez)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/setup-demo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "setup-demo"
+              ]
+            },
+            "description": "Crea la empresa demo y el usuario admin demo. Solo debe ejecutarse una vez en un backend nuevo."
+          },
+          "response": []
+        },
+        {
+          "name": "Login (guardar TOKEN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let jsonData = pm.response.json();",
+                  "if (jsonData.token) {",
+                  "  pm.collectionVariables.set(\"TOKEN\", jsonData.token);",
+                  "  console.log(\"TOKEN actualizado en variables de colección\");",
+                  "} else {",
+                  "  console.log(\"No se encontró token en la respuesta\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@demo.com\",\n  \"password\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "login"
+              ]
+            },
+            "description": "Login con el usuario demo. El test guarda automáticamente el token JWT en {{TOKEN}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Perfil (ruta protegida)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/perfil",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "perfil"
+              ]
+            },
+            "description": "Ejemplo de ruta protegida por JWT. Usa el token guardado en {{TOKEN}}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Clientes",
+      "item": [
+        {
+          "name": "Crear Cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nombre\": \"Carlos Pérez\",\n  \"documento\": \"123456789\",\n  \"telefono\": \"3001112233\",\n  \"correo\": \"carlos@mail.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "clientes"
+              ]
+            },
+            "description": "Crea un cliente para la empresa del usuario logueado."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar Clientes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/clientes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "clientes"
+              ]
+            },
+            "description": "Lista todos los clientes de la empresa del usuario logueado."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Vehículos",
+      "item": [
+        {
+          "name": "Crear Vehículo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cliente_id\": 1,\n  \"placa\": \"ABC123\",\n  \"tipo\": \"Carro\",\n  \"marca\": \"Toyota\",\n  \"modelo\": \"Corolla\",\n  \"color\": \"Rojo\",\n  \"es_propietario\": true\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/vehiculos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vehiculos"
+              ]
+            },
+            "description": "Crea un vehículo asociado a un cliente (cliente_id debe existir)."
+          },
+          "response": []
+        },
+        {
+          "name": "Buscar Vehículo por Placa",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{TOKEN}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/vehiculos/{{placa}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "vehiculos",
+                "{{placa}}"
+              ]
+            },
+            "description": "Consulta un vehículo por placa dentro de la empresa. Usa la variable de colección \"placa\" o reemplaza manualmente en la URL."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Parqueadero (pendiente)",
+      "item": [
+        {
+          "name": "TODO - endpoints por implementar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/parqueadero/todo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "parqueadero",
+                "todo"
+              ]
+            },
+            "description": "Carpeta preparada para futuros endpoints de parqueadero (entrada/salida, tarifas, pagos, historial). De momento este endpoint no existe y devolverá 404."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Lavadero (pendiente)",
+      "item": [
+        {
+          "name": "TODO - endpoints por implementar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/lavadero/todo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "lavadero",
+                "todo"
+              ]
+            },
+            "description": "Carpeta lista para órdenes de lavado, tipos de lavado, asignación de lavadores, control por vehículo. Aún no implementado en el backend."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Taller (pendiente)",
+      "item": [
+        {
+          "name": "TODO - endpoints por implementar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/taller/todo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "taller",
+                "todo"
+              ]
+            },
+            "description": "Carpeta reservada para órdenes de trabajo del taller, servicios, repuestos, mano de obra, estados de OT. Aún no implementado."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Reportes (pendiente)",
+      "item": [
+        {
+          "name": "TODO - endpoints por implementar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reportes/todo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reportes",
+                "todo"
+              ]
+            },
+            "description": "Carpeta preparada para reportes por rango de fechas, ingresos, etc. Aún no implementado."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:4000"
+    },
+    {
+      "key": "TOKEN",
+      "value": ""
+    },
+    {
+      "key": "placa",
+      "value": "ABC123"
+    }
+  ]
+}

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Autogestión360 - Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Vista de LOGIN -->
+    <div id="login-view" class="auth-container">
+      <div class="auth-card">
+        <h1 class="app-title">Autogestión360</h1>
+        <p class="app-subtitle">Acceso al panel de control</p>
+
+        <form id="login-form">
+          <div class="form-group">
+            <label for="login-email">Correo electrónico</label>
+            <input
+              type="email"
+              id="login-email"
+              placeholder="admin@demo.com"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="login-password">Contraseña</label>
+            <input
+              type="password"
+              id="login-password"
+              placeholder="Tu contraseña"
+              required
+            />
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-full">
+            Iniciar sesión
+          </button>
+
+          <div id="login-error" class="error-message" hidden></div>
+
+          <p class="demo-hint">
+            Demo: <strong>admin@demo.com</strong> / <strong>123456</strong>
+          </p>
+        </form>
+      </div>
+    </div>
+
+    <!-- Vista PRINCIPAL -->
+    <div id="main-view" class="main-layout hidden">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="sidebar-logo-circle">A</div>
+          <div>
+            <div class="sidebar-app-name">Autogestión360</div>
+            <div id="sidebar-empresa" class="sidebar-company-name">
+              Empresa demo
+            </div>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav">
+          <button class="nav-link active" data-view="dashboard">
+            🧭 Dashboard
+          </button>
+          <button class="nav-link" data-view="parqueadero">
+            🅿 Parqueadero
+          </button>
+          <button class="nav-link" data-view="lavadero">
+            🚿 Lavadero
+          </button>
+          <button class="nav-link" data-view="taller">
+            🔧 Taller
+          </button>
+          <button class="nav-link" data-view="clientes">
+            👥 Clientes
+          </button>
+          <button class="nav-link" data-view="empleados">
+            🧑‍🔧 Empleados
+          </button>
+          <button class="nav-link" data-view="reportes">
+            📊 Reportes
+          </button>
+          <button class="nav-link" data-view="config">
+            ⚙ Configuración
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button id="btn-logout" class="btn btn-ghost">Cerrar sesión</button>
+        </div>
+      </aside>
+
+      <!-- Contenido principal -->
+      <main class="main-content">
+        <header class="topbar">
+          <h2 id="current-view-title">Dashboard</h2>
+          <div class="topbar-right">
+            <span id="user-info-label">Usuario</span>
+          </div>
+        </header>
+
+        <section id="view-dashboard" class="view visible">
+          <div class="cards-grid">
+            <div class="card">
+              <h3>Vehículos en parqueadero</h3>
+              <p id="dash-parqueadero-count" class="big-number">0</p>
+            </div>
+            <div class="card">
+              <h3>Lavados en curso</h3>
+              <p id="dash-lavados-count" class="big-number">0</p>
+            </div>
+            <div class="card">
+              <h3>Órdenes de taller activas</h3>
+              <p id="dash-taller-count" class="big-number">0</p>
+            </div>
+          </div>
+
+          <div class="cards-grid">
+            <div class="card">
+              <h3>Ingresos del día</h3>
+              <div class="income-grid">
+                <div>
+                  <span class="label">Parqueadero</span>
+                  <span id="dash-ing-parqueadero" class="money">$ 0</span>
+                </div>
+                <div>
+                  <span class="label">Lavadero</span>
+                  <span id="dash-ing-lavadero" class="money">$ 0</span>
+                </div>
+                <div>
+                  <span class="label">Taller</span>
+                  <span id="dash-ing-taller" class="money">$ 0</span>
+                </div>
+                <div class="income-total">
+                  <span class="label">Total</span>
+                  <span id="dash-ing-total" class="money">$ 0</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>Ingresos últimos días</h3>
+              <div id="dash-chart-empty" class="chart-empty" hidden>
+                No hay datos para el rango seleccionado.
+              </div>
+              <div id="dash-chart" class="chart-bars"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Vistas de módulos (por ahora placeholders) -->
+        <section id="view-parqueadero" class="view">
+          <div class="cards-grid">
+            <!-- Formulario de entrada -->
+            <div class="card" card-full>
+              <h3>Registrar entrada</h3>
+              <form id="form-parqueadero-entrada">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-placa">Placa *</label>
+                    <input
+                      type="text"
+                      id="pq-placa"
+                      placeholder="ABC123"
+                      required
+                      maxlength="10"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-tipo">Tipo de vehículo *</label>
+                   <select id="pq-tipo" class="form-control" required>
+                    <option value="">Seleccione...</option>
+                    <option value="CARRO">CARRO</option>
+                    <option value="MOTO">MOTO</option>
+                    <option value="BICICLETA">BICICLETA</option>
+                    <option value="CUATRIMOTO">CUATRIMOTO</option>
+                  </select>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-nombre">Nombre del cliente</label>
+                    <input
+                      type="text"
+                      id="pq-nombre"
+                      placeholder="Opcional"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-telefono">Teléfono</label>
+                    <input
+                      type="tel"
+                      id="pq-telefono"
+                      placeholder="300..."
+                    />
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label>
+                    <input type="checkbox" id="pq-es-propietario" />
+                    ¿Es el propietario del vehículo?
+                  </label>
+                </div>
+
+                <div class="form-group">
+                  <label for="pq-obs">Observaciones</label>
+                  <textarea
+                    id="pq-obs"
+                    rows="2"
+                    placeholder="Ej: entra con rayón en puerta izquierda"
+                  ></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary">
+                  Registrar entrada
+                </button>
+                <div id="pq-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <!-- Vehículos activos -->
+            <div class="card" card-expand>
+              <h3>Vehículos en parqueadero</h3>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Placa</th>
+                      <th>Tipo</th>
+                      <th>Cliente</th>
+                      <th>Entrada</th>
+                      <th>Tiempo</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="pq-tbody">
+                    <!-- Filas dinámicas -->
+                  </tbody>
+                </table>
+                <div id="pq-empty" class="table-empty">
+                  No hay vehículos registrados actualmente.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+
+        <section id="view-lavadero" class="view">
+          <div class="card">
+            <h3>Módulo de Lavadero</h3>
+            <p>En construcción: órdenes de lavado, control de lavadores y tipos de lavado.</p>
+          </div>
+        </section>
+
+        <section id="view-taller" class="view">
+          <div class="card">
+            <h3>Módulo de Taller</h3>
+            <p>En construcción: órdenes de trabajo, repuestos y mano de obra.</p>
+          </div>
+        </section>
+
+        <section id="view-clientes" class="view">
+          <div class="card">
+            <h3>Clientes</h3>
+            <p>Administra tus clientes y su historial de servicios.</p>
+          </div>
+        </section>
+
+        <section id="view-empleados" class="view">
+          <div class="card">
+            <h3>Empleados</h3>
+            <p>Administra lavadores, mecánicos, cajeros y otros roles.</p>
+          </div>
+        </section>
+
+        <section id="view-reportes" class="view">
+          <div class="card">
+            <h3>Reportes</h3>
+            <p>Visualiza reportes más detallados por rango de fechas.</p>
+          </div>
+        </section>
+
+        <section id="view-config" class="view">
+          <div class="card">
+            <h3>Configuración</h3>
+            <p>Configuración de empresa, logo, zona horaria y licenciamiento (pendiente).</p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+ <!-- Modal de salida -->
+<div id="modal-salida" class="modal hidden">
+  <div class="modal-content">
+    <h3>Registrar salida</h3>
+
+    <p><strong>Placa:</strong> <span id="salida-placa"></span></p>
+    <p><strong>Tiempo:</strong> <span id="salida-tiempo"></span></p>
+    <p><strong>Valor a pagar:</strong> <span id="salida-valor"></span></p>
+
+    <div class="form-group">
+      <label for="pq-metodo-pago">Método de pago *</label>
+      <select id="pq-metodo-pago" required>
+        <option value="">Seleccione...</option>
+        <option value="EFECTIVO">Efectivo</option>
+        <option value="TRANSFERENCIA">Transferencia</option>
+        <option value="DEBITO">Tarjeta débito</option>
+        <option value="CREDITO">Tarjeta crédito</option>
+        <option value="MIXTO">Mixto</option>
+      </select>
+    </div>
+
+    <div class="form-group" id="pq-detalle-pago-group" hidden>
+      <label for="pq-detalle-pago">Detalle del pago</label>
+      <textarea id="pq-detalle-pago"
+        placeholder="Ej: 20.000 efectivo + 10.000 transferencia"></textarea>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="cerrarModalSalida()">Cancelar</button>
+      <button class="btn btn-primary" onclick="confirmarSalida()">Confirmar salida</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>
