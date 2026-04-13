@@ -343,11 +343,17 @@ async function handleEntradaParqueadero(event) {
     msgEl.classList.remove("error");
     msgEl.classList.add("ok");
 
+    // Limpiar todos los campos del formulario para el siguiente vehículo
+    placaEl.value = "";
+    tipoEl.value = "CARRO"; // Resetear al valor por defecto
     nombreEl.value = "";
     telEl.value = "";
     obsEl.value = "";
     if (evidenciaEl) evidenciaEl.value = "";
-    propEl.checked = true;
+    propEl.checked = true; // Resetear a "es propietario" por defecto
+
+    // Recargar la tabla de vehículos activos para mostrar el nuevo registro
+    await cargarParqueaderoActivo();
 
     await cargarParqueaderoActivo();   // ✅ ahora sí existe
   } catch (err) {
