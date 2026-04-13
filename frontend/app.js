@@ -153,10 +153,7 @@ async function loadDashboard() {
 
   // Cargar ingresos del día
   try {
-    console.log("Cargando ingresos del día...");
     const resumenDia = await apiFetch("/api/reportes/parqueadero/resumen-dia");
-    console.log("Resumen del día recibido:", resumenDia);
-
     const ingresosParqueadero = resumenDia.ingresos_totales || 0;
 
     // Mostrar ingresos del parqueadero
@@ -174,8 +171,6 @@ async function loadDashboard() {
       `$${ingresosTaller.toLocaleString("es-CO")} COP`;
     document.getElementById("dash-ing-total").textContent =
       `$${totalIngresos.toLocaleString("es-CO")} COP`;
-
-    console.log("Ingresos actualizados:", { ingresosParqueadero, totalIngresos });
   } catch (err) {
     console.error("Error cargando ingresos:", err);
     // Valores por defecto si falla la carga
