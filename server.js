@@ -2,6 +2,8 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
 const authRoutes = require("./routes/auth");
 const authMiddleware = require("./middleware/auth");
 
@@ -12,6 +14,11 @@ const empleadosRoutes = require("./routes/empleados");
 const lavaderoRoutes = require("./routes/lavadero");
 const tallerRoutes = require("./routes/taller");
 const reportesRoutes = require("./routes/reportes");
+const tarifasRoutes = require("./routes/tarifas");
+const pagosRoutes = require("./routes/pagos");
+const alertasRoutes = require("./routes/alertas");
+const auditorialRoutes = require("./routes/auditoria");
+const reportesParqueaderoRoutes = require("./routes/reportes-parqueadero");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -19,6 +26,9 @@ const PORT = process.env.PORT || 4000;
 // Middlewares
 app.use(cors());
 app.use(express.json());
+
+// Servir archivos estáticos del frontend
+app.use(express.static("frontend"));
 
 // Ruta de prueba
 app.get("/api/ping", (req, res) => {
@@ -37,6 +47,13 @@ app.use("/api/empleados", authMiddleware, empleadosRoutes);
 app.use("/api/lavadero", authMiddleware, lavaderoRoutes);
 app.use("/api/taller", authMiddleware, tallerRoutes);
 app.use("/api/reportes", authMiddleware, reportesRoutes);
+
+// Rutas de parqueadero avanzado
+app.use("/api/tarifas", authMiddleware, tarifasRoutes);
+app.use("/api/pagos", authMiddleware, pagosRoutes);
+app.use("/api/alertas", authMiddleware, alertasRoutes);
+app.use("/api/auditoria", authMiddleware, auditorialRoutes);
+app.use("/api/reportes/parqueadero", authMiddleware, reportesParqueaderoRoutes);
 
 
 

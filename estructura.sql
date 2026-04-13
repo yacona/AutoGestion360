@@ -279,6 +279,7 @@ CREATE TABLE public.parqueadero (
     metodo_pago character varying(30),
     detalle_pago text,
     observaciones text,
+    evidencia_url text,
     creado_en timestamp with time zone DEFAULT now() NOT NULL
 );
 

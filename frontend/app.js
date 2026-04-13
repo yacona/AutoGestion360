@@ -25,10 +25,16 @@ async function apiFetch(path, options = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
+  const requestOptions = {
     ...options,
     headers,
-  });
+  };
+
+  if (options.body instanceof FormData) {
+    delete requestOptions.headers["Content-Type"];
+  }
+
+  const res = await fetch(`${API_BASE_URL}${path}`, requestOptions);
 
   if (res.status === 401) {
     logout();
@@ -149,53 +155,89 @@ async function loadDashboard() {
 Procesar PLACA
 ======================================================*/
 document.getElementById("pq-placa").addEventListener("blur", async function () {
-                  const placa = this.value.trim().toUpperCase();
-                  if (!placa) return;
+  const placa = this.value.trim().toUpperCase();
+  if (!placa) return;
 
-                  try {
-                      const resp = await fetch(`/api/parqueadero/buscar/${placa}`, {
-                          headers: { Authorization: "Bearer " + localStorage.getItem("authToken") }
-                      });
+  try {
+    const data = await apiFetch(`/api/parqueadero/buscar/${placa}`);
+    procesarPlacaParqueadero(data);
+  } catch (err) {
+    console.error("Error consultando placa:", err);
+  }
+});
 
-                      const data = await resp.json();
-                      procesarPlacaParqueadero(data);
+function procesarPlacaParqueadero(data) {
+  const existe = data.existe;
+  const vehiculo = data.vehiculo;
+  const propietario = data.propietario;
+  const historial = data.historial;
+  const msgEl = document.getElementById("pq-msg");
+  const histEl = document.getElementById("pq-historial");
 
-                  } catch (err) {
-                      console.error("Error consultando placa:", err);
-                  }
-  });
-  function procesarPlacaParqueadero(data) {
-    const existe = data.existe;
-    const vehiculo = data.vehiculo;
-    const propietario = data.propietario;
+  if (msgEl) {
+    msgEl.hidden = true;
+    msgEl.textContent = "";
+  }
+  if (histEl) {
+    histEl.hidden = true;
+    histEl.textContent = "";
+  }
 
-    // LIMPIAR CAMPOS
-    document.getElementById("pq-tipo-vehiculo").value = "";
-    document.getElementById("pq-propietario-nombre").value = "";
-    document.getElementById("pq-propietario-telefono").value = "";
-    document.getElementById("pq-conductor-nombre").value = "";
-    document.getElementById("pq-conductor-telefono").value = "";
+  const tipoEl = document.getElementById("pq-tipo");
+  const nombreEl = document.getElementById("pq-nombre");
+  const telEl = document.getElementById("pq-telefono");
 
-    if (existe) {
-        // --- VEHÍCULO YA EXISTE ---
-        document.getElementById("pq-tipo-vehiculo").value = vehiculo.tipo_vehiculo;
+  if (tipoEl) tipoEl.value = "";
+  if (nombreEl) nombreEl.value = "";
+  if (telEl) telEl.value = "";
 
-        if (propietario) {
-            // Mostrar datos del propietario actual
-            document.getElementById("pq-propietario-nombre").value = propietario.nombre;
-            document.getElementById("pq-propietario-telefono").value = propietario.telefono;
-        }
+  if (existe) {
+    if (tipoEl) tipoEl.value = vehiculo.tipo_vehiculo || "";
 
-        // Mostrar historial en un panel
-        mostrarHistorialVehiculo(data.historial);
-
-        // Preguntar si quien INGRESA es el propietario
-        abrirModalPropietarioConductor("existe");
-
-    } else {
-        // --- VEHÍCULO NUEVO ---
-        abrirModalPropietarioConductor("nuevo");
+    if (propietario) {
+      if (nombreEl) nombreEl.value = propietario.nombre || "";
+      if (telEl) telEl.value = propietario.telefono || "";
     }
+
+    if (histEl) {
+      mostrarHistorialVehiculo(histEl, historial);
+    }
+
+    if (msgEl) {
+      msgEl.hidden = false;
+      msgEl.textContent = "Vehículo existente. El sistema cargó datos previos y el historial.";
+      msgEl.classList.remove("error");
+      msgEl.classList.add("ok");
+    }
+  } else {
+    if (msgEl) {
+      msgEl.hidden = false;
+      msgEl.textContent = "Vehículo nuevo. Complete los datos y registre la entrada.";
+      msgEl.classList.remove("error");
+      msgEl.classList.add("ok");
+    }
+  }
+}
+
+function mostrarHistorialVehiculo(element, historial) {
+  if (!element) return;
+  if (!historial) {
+    element.hidden = true;
+    return;
+  }
+
+  const parqueoCount = Array.isArray(historial.parqueadero)
+    ? historial.parqueadero.length
+    : 0;
+  const lavaderoCount = Array.isArray(historial.lavadero)
+    ? historial.lavadero.length
+    : 0;
+  const tallerCount = Array.isArray(historial.taller)
+    ? historial.taller.length
+    : 0;
+
+  element.hidden = false;
+  element.innerHTML = `Vehículo con historial: ${parqueoCount} parqueadero(s), ${lavaderoCount} lavadero(s), ${tallerCount} taller(es). Si hay un nuevo propietario, habilite la casilla y actualice el nombre.`;
 }
 
 
@@ -230,18 +272,41 @@ async function handleEntradaParqueadero(event) {
     msgEl.classList.add("error");
     return;
   }
-              
+
+  if (!nombre_cliente) {
+    msgEl.textContent = "Debe indicar el nombre del propietario/conductor.";
+    msgEl.hidden = false;
+    msgEl.classList.remove("ok");
+    msgEl.classList.add("error");
+    return;
+  }
+
+  const evidenciaEl = document.getElementById("pq-evidencia");
+  const evidenciaFile = evidenciaEl?.files?.[0] || null;
+
   try {
+    const formData = new FormData();
+    formData.append("placa", placa);
+    formData.append("tipo_vehiculo", tipo_vehiculo);
+    formData.append("es_conductor_propietario", String(es_propietario));
+    formData.append("observaciones", observaciones || "");
+    formData.append("propietario_nombre", nombre_cliente);
+    formData.append("propietario_telefono", telefono || "");
+    formData.append("propietario_documento", "SIN_DOCUMENTO");
+
+    if (!es_propietario) {
+      formData.append("conductor_nombre", nombre_cliente);
+      formData.append("conductor_telefono", telefono || "");
+      formData.append("conductor_documento", "SIN_DOCUMENTO");
+    }
+
+    if (evidenciaFile) {
+      formData.append("evidencia", evidenciaFile);
+    }
+
     await apiFetch("/api/parqueadero/entrada", {
       method: "POST",
-      body: JSON.stringify({
-        placa,
-        tipo_vehiculo,
-        nombre_cliente: nombre_cliente || null,
-        telefono: telefono || null,
-        es_propietario,
-        observaciones: observaciones || null,
-      }),
+      body: formData,
     });
 
     msgEl.textContent = "Entrada registrada correctamente.";
@@ -252,6 +317,7 @@ async function handleEntradaParqueadero(event) {
     nombreEl.value = "";
     telEl.value = "";
     obsEl.value = "";
+    if (evidenciaEl) evidenciaEl.value = "";
     propEl.checked = true;
 
     await cargarParqueaderoActivo();   // ✅ ahora sí existe

@@ -2,8 +2,39 @@
 const express = require("express");
 const db = require("../db");
 const auth = require("../middleware/auth");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 
 const router = express.Router();
+
+// Configurar multer para evidencias
+const evidenciaDir = path.join(__dirname, "..", "uploads", "parqueadero");
+if (!fs.existsSync(evidenciaDir)) {
+  fs.mkdirSync(evidenciaDir, { recursive: true });
+}
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: evidenciaDir,
+    filename: (req, file, cb) => {
+      const timestamp = Date.now();
+      const random = Math.round(Math.random() * 1e9);
+      const ext = path.extname(file.originalname);
+      const filename = `evidencia-${timestamp}-${random}${ext}`;
+      cb(null, filename);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith("image/")) {
+      return cb(new Error("Solo se permiten imágenes como evidencia."), false);
+    }
+    cb(null, true);
+  },
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB
+  },
+});
 
 /**
  * Normaliza placa a MAYÚSCULAS y sin espacios
@@ -46,7 +77,7 @@ function limpiarTexto(txt) {
  *   observaciones: "Texto libre..."
  * }
  */
-router.post("/entrada", auth, async (req, res) => {
+router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
   const empresa_id = req.user.empresa_id;
 
   try {
@@ -66,6 +97,9 @@ router.post("/entrada", auth, async (req, res) => {
 
       observaciones,
     } = req.body || {};
+
+    // Procesar archivo de evidencia si existe
+    const evidencia_url = req.file ? `/uploads/parqueadero/${req.file.filename}` : null;
 
     // Normalizar datos
     placa = normalizarPlaca(placa);
@@ -137,17 +171,17 @@ router.post("/entrada", auth, async (req, res) => {
 
     if (vehiculos.length === 0) {
       // 🚗 Vehículo NUEVO en el sistema
-      if (!propietario_nombre || !propietario_documento) {
+      if (!propietario_nombre) {
         await db.query("ROLLBACK");
         return res.status(400).json({
           error:
-            "Vehículo nuevo. Debe registrar al menos nombre y documento del propietario.",
+            "Vehículo nuevo. Debe registrar al menos nombre del propietario.",
         });
       }
 
-      // 2.1) Buscar si ya existe un cliente con ese documento
+      // 2.1) Buscar si ya existe un cliente con ese documento (solo si hay documento válido)
       let clienteRow;
-      if (propietario_documento) {
+      if (propietario_documento && propietario_documento !== "SIN_DOCUMENTO") {
         const { rows: clientesDoc } = await db.query(
           `SELECT id, nombre, documento, telefono, correo
            FROM clientes
@@ -172,7 +206,7 @@ router.post("/entrada", auth, async (req, res) => {
           [
             empresa_id,
             propietario_nombre,
-            propietario_documento || null,
+            propietario_documento && propietario_documento !== "SIN_DOCUMENTO" ? propietario_documento : null,
             propietario_telefono || null,
             propietario_correo || null,
           ]
@@ -213,8 +247,86 @@ router.post("/entrada", auth, async (req, res) => {
         correo: v.propietario_correo_db,
       };
 
-      // NOTA: aquí NO cambiamos propietario legal.
-      // Eso se hará en un módulo aparte de "Cambio de propietario".
+      if (es_conductor_propietario && propietario_nombre) {
+        const nombreActual = (v.propietario_nombre_db || "").trim().toUpperCase();
+        const documentoActual = (v.propietario_documento_db || "").trim();
+        const nombreNuevo = propietario_nombre.trim().toUpperCase();
+        const documentoNuevo =
+          propietario_documento && propietario_documento !== "SIN_DOCUMENTO"
+            ? propietario_documento.trim()
+            : null;
+
+        if (
+          !nombreActual ||
+          nombreNuevo !== nombreActual ||
+          (documentoNuevo && documentoNuevo !== documentoActual)
+        ) {
+          let clienteRow;
+
+          if (documentoNuevo) {
+            const { rows: clientesDoc } = await db.query(
+              `SELECT id, nombre, documento, telefono, correo
+               FROM clientes
+               WHERE empresa_id = $1
+                 AND documento = $2
+               LIMIT 1`,
+              [empresa_id, documentoNuevo]
+            );
+            if (clientesDoc.length > 0) {
+              clienteRow = clientesDoc[0];
+            }
+          }
+
+          if (!clienteRow) {
+            const { rows: clientesNombre } = await db.query(
+              `SELECT id, nombre, documento, telefono, correo
+               FROM clientes
+               WHERE empresa_id = $1
+                 AND UPPER(TRIM(nombre)) = $2
+               LIMIT 1`,
+              [empresa_id, nombreNuevo]
+            );
+            if (clientesNombre.length > 0) {
+              clienteRow = clientesNombre[0];
+            }
+          }
+
+          if (!clienteRow) {
+            const insertCliente = await db.query(
+              `INSERT INTO clientes
+               (empresa_id, nombre, documento, telefono, correo)
+               VALUES ($1, $2, $3, $4, $5)
+               RETURNING id, nombre, documento, telefono, correo`,
+              [
+                empresa_id,
+                propietario_nombre,
+                documentoNuevo || null,
+                propietario_telefono || null,
+                propietario_correo || null,
+              ]
+            );
+            clienteRow = insertCliente.rows[0];
+          }
+
+          if (clienteRow && clienteRow.id !== propietario_cliente_id) {
+            await db.query(
+              `UPDATE vehiculos
+               SET cliente_id = $1
+               WHERE id = $2`,
+              [clienteRow.id, vehiculo_id]
+            );
+            propietario_cliente_id = clienteRow.id;
+          }
+
+          propietario_final = {
+            id: clienteRow.id,
+            nombre: clienteRow.nombre,
+            documento: clienteRow.documento,
+            telefono: clienteRow.telefono,
+            correo: clienteRow.correo,
+          };
+        }
+      }
     }
 
     // 3) Resolver datos del CONDUCTOR (persona que ingresa)
@@ -250,9 +362,10 @@ router.post("/entrada", auth, async (req, res) => {
          nombre_cliente,   -- nombre del CONDUCTOR que ingresa
          telefono,         -- teléfono del conductor
          es_propietario,   -- indica si el conductor es el propietario
-         observaciones
+         observaciones,
+         evidencia_url
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
         empresa_id,
@@ -264,6 +377,7 @@ router.post("/entrada", auth, async (req, res) => {
         telefono_conductor_final || propietario_final.telefono || null,
         es_conductor_propietario,
         observaciones || null,
+        evidencia_url,
       ]
     );
 
@@ -283,12 +397,17 @@ router.post("/entrada", auth, async (req, res) => {
     });
   } catch (err) {
     console.error("Error en POST /api/parqueadero/entrada:", err);
+    if (req.file) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+    }
     try {
       await db.query("ROLLBACK");
     } catch (_) {}
     return res
       .status(500)
-      .json({ error: "Error registrando entrada al parqueadero." });
+      .json({ error: err.message || "Error registrando entrada al parqueadero." });
   }
 });
 // GET /api/parqueadero/pre-carga/:placa
@@ -490,4 +609,177 @@ router.get("/buscar/:placa", auth, async (req, res) => {
       .json({ error: "Error interno buscando información de la placa." });
   }
 });
+
+/**
+ * POST /api/parqueadero/salida/:id
+ *
+ * Registra la salida de un vehículo del parqueadero por ID de registro,
+ * calcula el tiempo total, minutos y valor basado en tarifa por hora.
+ *
+ * Body (JSON) esperado:
+ * {
+ *   metodo_pago: "EFECTIVO" | "TARJETA" | "TRANSFERENCIA" | ...,
+ *   detalle_pago: "Texto opcional sobre el pago...",
+ *   observaciones: "Observaciones adicionales..."
+ * }
+ */
+router.post("/salida/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const registro_id = req.params.id;
+
+  try {
+    let { metodo_pago, detalle_pago, observaciones } = req.body || {};
+
+    // Normalizar datos
+    metodo_pago = limpiarTexto(metodo_pago);
+    detalle_pago = limpiarTexto(detalle_pago);
+    observaciones = limpiarTexto(observaciones);
+
+    // Validaciones básicas
+    if (!registro_id || isNaN(registro_id)) {
+      return res.status(400).json({ error: "ID de registro inválido." });
+    }
+
+    // Si no se especifica método de pago, usar "EFECTIVO" por defecto
+    if (!metodo_pago) {
+      metodo_pago = "EFECTIVO";
+    }
+
+    // Abrimos transacción
+    await db.query("BEGIN");
+
+    // 1) Buscar el registro activo por ID y empresa
+    const { rows: activos } = await db.query(
+      `SELECT id, hora_entrada, tipo_vehiculo, placa
+       FROM parqueadero
+       WHERE id = $1
+         AND empresa_id = $2
+         AND hora_salida IS NULL`,
+      [registro_id, empresa_id]
+    );
+
+    if (activos.length === 0) {
+      await db.query("ROLLBACK");
+      return res.status(404).json({
+        error: "Registro no encontrado o ya fue cerrado.",
+      });
+    }
+
+    const registro = activos[0];
+    const hora_entrada = new Date(registro.hora_entrada);
+    const hora_salida = new Date(); // Ahora
+
+    // 2) Calcular tiempo total en minutos
+    const diffMs = hora_salida - hora_entrada;
+    const minutos_total = Math.ceil(diffMs / (1000 * 60));
+
+    // 3) Obtener tarifa configurada para este tipo de vehículo
+    const { rows: tarifas } = await db.query(
+      `SELECT tarifa_por_hora, tarifa_minima, descuento_prolongada_horas, descuento_prolongada_porcentaje
+       FROM tarifas WHERE empresa_id = $1 AND tipo_vehiculo = $2 AND activo = TRUE`,
+      [empresa_id, registro.tipo_vehiculo]
+    );
+
+    let tarifa_por_hora = 1000;
+    let tarifa_minima = null;
+    let porcentaje_descuento = 0;
+
+    if (tarifas.length > 0) {
+      const tarifa = tarifas[0];
+      tarifa_por_hora = parseFloat(tarifa.tarifa_por_hora);
+      tarifa_minima = tarifa.tarifa_minima ? parseFloat(tarifa.tarifa_minima) : null;
+      porcentaje_descuento = tarifas.length > 0 && tarifas[0].descuento_prolongada_horas &&
+        minutos_total / 60 >= tarifas[0].descuento_prolongada_horas
+        ? parseFloat(tarifas[0].descuento_prolongada_porcentaje) || 0
+        : 0;
+    }
+
+    const horas_total = minutos_total / 60;
+    let valor_total = Math.ceil(horas_total * tarifa_por_hora);
+    if (tarifa_minima && valor_total < tarifa_minima) valor_total = Math.ceil(tarifa_minima);
+    if (porcentaje_descuento > 0) valor_total = Math.ceil(valor_total * (1 - porcentaje_descuento / 100));
+
+    // 5) Actualizar el registro
+    const updateQuery = await db.query(
+      `UPDATE parqueadero
+       SET hora_salida = $1,
+           minutos_total = $2,
+           valor_total = $3,
+           metodo_pago = $4,
+           detalle_pago = $5,
+           observaciones = COALESCE(observaciones || '\n', '') || $6
+       WHERE id = $7
+       RETURNING *`,
+      [
+        hora_salida,
+        minutos_total,
+        valor_total,
+        metodo_pago,
+        detalle_pago || null,
+        observaciones || null,
+        registro_id,
+      ]
+    );
+
+    await db.query("COMMIT");
+
+    const registroActualizado = updateQuery.rows[0];
+
+    return res.json({
+      mensaje: "Salida registrada correctamente.",
+      parqueadero: registroActualizado,
+      resumen: {
+        tiempo_total_minutos: minutos_total,
+        tiempo_total_horas: (minutos_total / 60).toFixed(2),
+        valor_total: valor_total,
+        tarifa_aplicada: `${tarifa_por_hora} COP/hora`,
+      },
+    });
+  } catch (err) {
+    console.error("Error en POST /api/parqueadero/salida:", err);
+    try {
+      await db.query("ROLLBACK");
+    } catch (_) {}
+    return res
+      .status(500)
+      .json({ error: "Error registrando salida del parqueadero." });
+  }
+});
+
+/**
+ * GET /api/parqueadero/activo
+ *
+ * Lista todos los registros activos del parqueadero (sin hora_salida)
+ */
+router.get("/activo", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+
+  try {
+    const { rows } = await db.query(
+      `SELECT
+         p.id,
+         p.placa,
+         p.tipo_vehiculo,
+         p.nombre_cliente,
+         p.telefono,
+         p.hora_entrada,
+         p.observaciones,
+         v.marca,
+         v.modelo,
+         v.color
+       FROM parqueadero p
+       LEFT JOIN vehiculos v ON v.id = p.vehiculo_id
+       WHERE p.empresa_id = $1
+         AND p.hora_salida IS NULL
+       ORDER BY p.hora_entrada ASC`,
+      [empresa_id]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Error obteniendo parqueadero activo:", err);
+    res.status(500).json({ error: "Error interno del servidor." });
+  }
+});
+
 module.exports = router;
