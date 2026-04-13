@@ -40,30 +40,12 @@ router.post("/", auth, async (req, res) => {
   }
 
   try {
-    // Verificar duplicado por email (si viene email)
-    if (email) {
-      const { rows: existentes } = await db.query(
-        `SELECT id, nombre, rol, email
-         FROM empleados
-         WHERE empresa_id = $1 AND email = $2
-         LIMIT 1`,
-        [empresa_id, email]
-      );
-
-      if (existentes.length > 0) {
-        return res.status(400).json({
-          error: "Ya existe un empleado con ese email en esta empresa.",
-          empleado_existente: existentes[0],
-        });
-      }
-    }
-
     const { rows } = await db.query(
       `INSERT INTO empleados 
-       (empresa_id, nombre, rol, telefono, email, activo)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING *`,
-      [empresa_id, nombre, rol, telefono, email || null, activo ?? true]
+       (empresa_id, nombre, rol, telefono, activo)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING *, NULL::text AS email, creado_en AS fecha_registro`,
+      [empresa_id, nombre, rol, telefono, activo ?? true]
     );
 
     res.json(rows[0]);
@@ -72,7 +54,7 @@ router.post("/", auth, async (req, res) => {
 
     if (err.code === "23505") {
       return res.status(400).json({
-        error: "Empleado duplicado (email ya existe para esta empresa).",
+        error: "Empleado duplicado para esta empresa.",
       });
     }
 
@@ -111,7 +93,7 @@ router.get("/", auth, async (req, res) => {
 
   try {
     const { rows } = await db.query(
-      `SELECT *
+      `SELECT *, NULL::text AS email, creado_en AS fecha_registro
        FROM empleados
        ${where}
        ORDER BY nombre ASC`,
@@ -135,7 +117,7 @@ router.get("/:id", auth, async (req, res) => {
 
   try {
     const { rows } = await db.query(
-      `SELECT *
+      `SELECT *, NULL::text AS email, creado_en AS fecha_registro
        FROM empleados
        WHERE empresa_id = $1 AND id = $2
        LIMIT 1`,
@@ -185,37 +167,18 @@ router.put("/:id", auth, async (req, res) => {
       return res.status(404).json({ error: "Empleado no encontrado." });
     }
 
-    // Si cambia el email, validar duplicado
-    if (email) {
-      const { rows: dup } = await db.query(
-        `SELECT id 
-         FROM empleados
-         WHERE empresa_id = $1 AND email = $2 AND id <> $3
-         LIMIT 1`,
-        [empresa_id, email, id]
-      );
-
-      if (dup.length > 0) {
-        return res.status(400).json({
-          error: "Ya existe otro empleado con ese email en esta empresa.",
-        });
-      }
-    }
-
     const { rows } = await db.query(
       `UPDATE empleados
        SET nombre = $1,
            rol = $2,
            telefono = $3,
-           email = $4,
-           activo = $5
-       WHERE empresa_id = $6 AND id = $7
-       RETURNING *`,
+           activo = $4
+       WHERE empresa_id = $5 AND id = $6
+       RETURNING *, NULL::text AS email, creado_en AS fecha_registro`,
       [
         nombre,
         rol,
         telefono,
-        email || null,
         typeof activo === "boolean" ? activo : true,
         empresa_id,
         id,
@@ -250,7 +213,7 @@ router.patch("/:id/estado", auth, async (req, res) => {
       `UPDATE empleados
        SET activo = $1
        WHERE empresa_id = $2 AND id = $3
-       RETURNING *`,
+       RETURNING *, NULL::text AS email, creado_en AS fecha_registro`,
       [activo, empresa_id, id]
     );
 
@@ -262,6 +225,34 @@ router.patch("/:id/estado", auth, async (req, res) => {
   } catch (err) {
     console.error("Error cambiando estado de empleado:", err);
     res.status(500).json({ error: "Error cambiando estado del empleado." });
+  }
+});
+
+/**
+ * DELETE /api/empleados/:id
+ * Desactiva un empleado sin borrarlo físicamente.
+ */
+router.delete("/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const { id } = req.params;
+
+  try {
+    const { rows } = await db.query(
+      `UPDATE empleados
+       SET activo = false
+       WHERE empresa_id = $1 AND id = $2
+       RETURNING *, NULL::text AS email, creado_en AS fecha_registro`,
+      [empresa_id, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Empleado no encontrado." });
+    }
+
+    res.json({ mensaje: "Empleado desactivado.", empleado: rows[0] });
+  } catch (err) {
+    console.error("Error desactivando empleado:", err);
+    res.status(500).json({ error: "Error desactivando empleado." });
   }
 });
 

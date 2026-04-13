@@ -5,15 +5,15 @@ const auth = require("../middleware/auth");
 
 const router = express.Router();
 
-const ESTADOS_OT = ["Diagnostico", "En_Reparacion", "Listo", "Entregado"];
+const ESTADOS_OT = ["Diagnóstico", "Diagnostico", "En_Reparacion", "Listo", "Entregado"];
 
 /**
  * Helper: calcular totales de una orden con base en sus ítems
  */
 async function recalcularTotalesOrden(orden_id) {
   const { rows } = await db.query(
-    `SELECT tipo_item, total_linea
-     FROM ordenes_taller_items
+    `SELECT total_linea, tipo_item
+     FROM taller_items
      WHERE orden_id = $1`,
     [orden_id]
   );
@@ -32,12 +32,10 @@ async function recalcularTotalesOrden(orden_id) {
   const total_general = total_mano_obra + total_repuestos;
 
   await db.query(
-    `UPDATE ordenes_taller
-     SET total_mano_obra = $1,
-         total_repuestos = $2,
-         total_general = $3
-     WHERE id = $4`,
-    [total_mano_obra, total_repuestos, total_general, orden_id]
+    `UPDATE taller_ordenes
+     SET total_orden = $1
+     WHERE id = $2`,
+    [total_general, orden_id]
   );
 }
 
@@ -51,13 +49,21 @@ router.post("/", auth, async (req, res) => {
   const {
     placa,
     descripcion_falla,
+    descripcion,
     cliente_id,
     vehiculo_id,
     mecanico_id,
+    empleado_id,
+    total_orden,
+    total_general,
     observaciones,
+    notas,
   } = req.body;
 
-  if (!placa || !descripcion_falla) {
+  const descripcionFinal = descripcion_falla || descripcion;
+  const mecanicoFinal = mecanico_id || empleado_id || null;
+  const totalFinal = total_orden ?? total_general ?? 0;
+  if (!placa || !descripcionFinal) {
     return res.status(400).json({
       error: "Placa y descripción de la falla son obligatorias.",
     });
@@ -66,8 +72,8 @@ router.post("/", auth, async (req, res) => {
   try {
     // 1️⃣ Generar numero_orden consecutivo por empresa
     const { rows: maxRow } = await db.query(
-      `SELECT COALESCE(MAX(numero_orden), 0) + 1 AS siguiente
-       FROM ordenes_taller
+      `SELECT COALESCE(MAX(numero_orden::bigint), 0) + 1 AS siguiente
+       FROM taller_ordenes
        WHERE empresa_id = $1`,
       [empresa_id]
     );
@@ -75,20 +81,20 @@ router.post("/", auth, async (req, res) => {
 
     // 2️⃣ Insertar OT
     const { rows } = await db.query(
-      `INSERT INTO ordenes_taller
+      `INSERT INTO taller_ordenes
        (empresa_id, numero_orden, placa, descripcion_falla,
-        cliente_id, vehiculo_id, mecanico_id, observaciones)
+        cliente_id, vehiculo_id, mecanico_id, total_orden)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING *`,
+       RETURNING *, descripcion_falla AS descripcion, total_orden AS total_general`,
       [
         empresa_id,
         numero_orden,
         placa.toUpperCase().trim(),
-        descripcion_falla,
+        descripcionFinal,
         cliente_id || null,
         vehiculo_id || null,
-        mecanico_id || null,
-        observaciones || null,
+        mecanicoFinal,
+        totalFinal,
       ]
     );
 
@@ -134,8 +140,11 @@ router.get("/", auth, async (req, res) => {
     const { rows } = await db.query(
       `SELECT 
          ot.*,
+         ot.descripcion_falla AS descripcion,
+         ot.total_orden AS total_general,
          c.nombre AS cliente_nombre,
-         e.nombre AS mecanico_nombre
+         e.nombre AS mecanico_nombre,
+         e.nombre AS empleado_nombre
        FROM ordenes_taller ot
        LEFT JOIN clientes c ON c.id = ot.cliente_id
        LEFT JOIN empleados e ON e.id = ot.mecanico_id
@@ -154,6 +163,68 @@ router.get("/", auth, async (req, res) => {
 });
 
 /**
+ * GET /api/taller/historial/filter
+ * Filtros opcionales: ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD&estado=&mecanico_id=
+ */
+router.get("/historial/filter", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const { desde, hasta, estado, mecanico_id } = req.query;
+
+  const condiciones = ["ot.empresa_id = $1"];
+  const params = [empresa_id];
+  let idx = 2;
+
+  if (desde) {
+    condiciones.push(`ot.fecha_creacion >= $${idx}`);
+    params.push(desde);
+    idx++;
+  }
+
+  if (hasta) {
+    condiciones.push(`ot.fecha_creacion <= $${idx}`);
+    params.push(hasta);
+    idx++;
+  }
+
+  if (estado) {
+    condiciones.push(`ot.estado = $${idx}`);
+    params.push(estado);
+    idx++;
+  }
+
+  if (mecanico_id) {
+    condiciones.push(`ot.mecanico_id = $${idx}`);
+    params.push(mecanico_id);
+    idx++;
+  }
+
+  try {
+    const { rows } = await db.query(
+      `SELECT
+         ot.*,
+         ot.descripcion_falla AS descripcion,
+         ot.total_orden AS total_general,
+         c.nombre AS cliente_nombre,
+         e.nombre AS mecanico_nombre,
+         e.nombre AS empleado_nombre
+       FROM ordenes_taller ot
+       LEFT JOIN clientes c ON c.id = ot.cliente_id
+       LEFT JOIN empleados e ON e.id = ot.mecanico_id
+       WHERE ${condiciones.join(" AND ")}
+       ORDER BY ot.fecha_creacion DESC`,
+      params
+    );
+
+    return res.json(rows);
+  } catch (err) {
+    console.error("🔥 Error obteniendo historial OT:", err);
+    return res
+      .status(500)
+      .json({ error: "Error obteniendo historial de órdenes de taller." });
+  }
+});
+
+/**
  * GET /api/taller/:id
  * Obtener detalle de una OT, incluyendo ítems
  */
@@ -165,8 +236,11 @@ router.get("/:id", auth, async (req, res) => {
     const { rows: otRows } = await db.query(
       `SELECT 
          ot.*,
+         ot.descripcion_falla AS descripcion,
+         ot.total_orden AS total_general,
          c.nombre AS cliente_nombre,
-         e.nombre AS mecanico_nombre
+         e.nombre AS mecanico_nombre,
+         e.nombre AS empleado_nombre
        FROM ordenes_taller ot
        LEFT JOIN clientes c ON c.id = ot.cliente_id
        LEFT JOIN empleados e ON e.id = ot.mecanico_id
@@ -181,7 +255,7 @@ router.get("/:id", auth, async (req, res) => {
 
     const { rows: items } = await db.query(
       `SELECT *
-       FROM ordenes_taller_items
+       FROM taller_items
        WHERE orden_id = $1
        ORDER BY id ASC`,
       [id]
@@ -220,7 +294,7 @@ router.patch("/:id/estado", auth, async (req, res) => {
       UPDATE ordenes_taller
       SET estado = $1
       WHERE empresa_id = $2 AND id = $3
-      RETURNING *`;
+      RETURNING *, descripcion_falla AS descripcion, total_orden AS total_general`;
     const params = [estado, empresa_id, id];
 
     if (estado === "Entregado") {
@@ -229,7 +303,7 @@ router.patch("/:id/estado", auth, async (req, res) => {
         SET estado = $1,
             fecha_entrega = NOW()
         WHERE empresa_id = $2 AND id = $3
-        RETURNING *`;
+        RETURNING *, descripcion_falla AS descripcion, total_orden AS total_general`;
     }
 
     const { rows } = await db.query(queryText, params);
@@ -242,6 +316,44 @@ router.patch("/:id/estado", auth, async (req, res) => {
   } catch (err) {
     console.error("🔥 Error cambiando estado de OT:", err);
     return res.status(500).json({ error: "Error cambiando estado de OT." });
+  }
+});
+
+/**
+ * PATCH /api/taller/:id
+ * Alias simple para el frontend: permite cambiar estado con { estado }.
+ */
+router.patch("/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const { id } = req.params;
+  const { estado } = req.body || {};
+
+  if (!estado || !ESTADOS_OT.includes(estado)) {
+    return res.status(400).json({
+      error:
+        "Estado inválido. Valores permitidos: Diagnostico, En_Reparacion, Listo, Entregado",
+    });
+  }
+
+  try {
+    const entregar = estado === "Entregado";
+    const { rows } = await db.query(
+      `UPDATE ordenes_taller
+       SET estado = $1,
+           fecha_entrega = CASE WHEN $2 THEN NOW() ELSE fecha_entrega END
+       WHERE empresa_id = $3 AND id = $4
+       RETURNING *, descripcion_falla AS descripcion, total_orden AS total_general`,
+      [estado, entregar, empresa_id, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Orden de taller no encontrada." });
+    }
+
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error("🔥 Error actualizando OT:", err);
+    return res.status(500).json({ error: "Error actualizando orden de taller." });
   }
 });
 
@@ -285,7 +397,7 @@ router.post("/:id/items", auth, async (req, res) => {
     }
 
     const { rows } = await db.query(
-      `INSERT INTO ordenes_taller_items
+      `INSERT INTO taller_items
        (orden_id, tipo_item, descripcion, cantidad, precio_unitario, total_linea)
        VALUES ($1,$2,$3,$4,$5,$6)
        RETURNING *`,
@@ -315,7 +427,7 @@ router.delete("/items/:itemId", auth, async (req, res) => {
     // Primero obtenemos la orden a la que pertenece
     const { rows: itemRows } = await db.query(
       `SELECT orden_id
-       FROM ordenes_taller_items
+       FROM taller_items
        WHERE id = $1
        LIMIT 1`,
       [itemId]
@@ -328,7 +440,7 @@ router.delete("/items/:itemId", auth, async (req, res) => {
     const orden_id = itemRows[0].orden_id;
 
     await db.query(
-      `DELETE FROM ordenes_taller_items
+      `DELETE FROM taller_items
        WHERE id = $1`,
       [itemId]
     );
@@ -352,7 +464,7 @@ router.delete("/items/:itemId", auth, async (req, res) => {
 router.post("/:id/pago", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { id } = req.params;
-  const { metodo_pago, detalle_pago } = req.body;
+  const { metodo_pago } = req.body;
 
   if (!metodo_pago) {
     return res
@@ -361,89 +473,29 @@ router.post("/:id/pago", auth, async (req, res) => {
   }
 
   try {
-    const detalleStr =
-      detalle_pago !== undefined && detalle_pago !== null
-        ? JSON.stringify(detalle_pago)
-        : null;
-
     const { rows } = await db.query(
-      `UPDATE ordenes_taller
-       SET metodo_pago = $1,
-           detalle_pago = $2::jsonb
-       WHERE empresa_id = $3 AND id = $4
-       RETURNING *`,
-      [metodo_pago, detalleStr, empresa_id, id]
+      `SELECT *, descripcion_falla AS descripcion, total_orden AS total_general
+       FROM ordenes_taller
+       WHERE empresa_id = $1 AND id = $2
+       LIMIT 1`,
+      [empresa_id, id]
     );
 
     if (rows.length === 0) {
       return res.status(404).json({ error: "Orden de taller no encontrada." });
     }
 
-    return res.json(rows[0]);
+    return res.json({
+      mensaje:
+        "Pago recibido por la API, pero la tabla taller_ordenes aún no tiene columnas de pago. No se persistió metodo_pago.",
+      orden: rows[0],
+      metodo_pago,
+    });
   } catch (err) {
     console.error("🔥 Error registrando pago en OT:", err);
     return res
       .status(500)
       .json({ error: "Error registrando pago de orden de taller." });
-  }
-});
-
-/**
- * GET /api/taller/historial
- * Filtros opcionales: ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD&estado=&mecanico_id=
- */
-router.get("/historial/filter", auth, async (req, res) => {
-  const empresa_id = req.user.empresa_id;
-  const { desde, hasta, estado, mecanico_id } = req.query;
-
-  const condiciones = ["ot.empresa_id = $1"];
-  const params = [empresa_id];
-  let idx = 2;
-
-  if (desde) {
-    condiciones.push(`ot.fecha_creacion >= $${idx}`);
-    params.push(desde);
-    idx++;
-  }
-
-  if (hasta) {
-    condiciones.push(`ot.fecha_creacion <= $${idx}`);
-    params.push(hasta);
-    idx++;
-  }
-
-  if (estado) {
-    condiciones.push(`ot.estado = $${idx}`);
-    params.push(estado);
-    idx++;
-  }
-
-  if (mecanico_id) {
-    condiciones.push(`ot.mecanico_id = $${idx}`);
-    params.push(mecanico_id);
-    idx++;
-  }
-
-  try {
-    const { rows } = await db.query(
-      `SELECT 
-         ot.*,
-         c.nombre AS cliente_nombre,
-         e.nombre AS mecanico_nombre
-       FROM ordenes_taller ot
-       LEFT JOIN clientes c ON c.id = ot.cliente_id
-       LEFT JOIN empleados e ON e.id = ot.mecanico_id
-       WHERE ${condiciones.join(" AND ")}
-       ORDER BY ot.fecha_creacion DESC`,
-      params
-    );
-
-    return res.json(rows);
-  } catch (err) {
-    console.error("🔥 Error obteniendo historial OT:", err);
-    return res
-      .status(500)
-      .json({ error: "Error obteniendo historial de órdenes de taller." });
   }
 });
 

@@ -25,9 +25,9 @@ router.post("/tipos", auth, async (req, res) => {
 
   try {
     const { rows } = await db.query(
-      `INSERT INTO tipos_lavado (empresa_id, nombre, precio, descripcion)
+      `INSERT INTO tipos_lavado (empresa_id, nombre, precio_base, descripcion)
        VALUES ($1,$2,$3,$4)
-       RETURNING *`,
+       RETURNING *, precio_base AS precio`,
       [empresa_id, nombre, precio, descripcion || null]
     );
     return res.json(rows[0]);
@@ -51,7 +51,7 @@ router.get("/tipos", auth, async (req, res) => {
 
   try {
     const { rows } = await db.query(
-      `SELECT *
+      `SELECT *, precio_base AS precio
        FROM tipos_lavado
        WHERE empresa_id = $1
        ORDER BY nombre ASC`,
@@ -83,11 +83,11 @@ router.put("/tipos/:id", auth, async (req, res) => {
     const { rows } = await db.query(
       `UPDATE tipos_lavado
        SET nombre = $1,
-           precio = $2,
+           precio_base = $2,
            descripcion = $3,
            activo = $4
        WHERE empresa_id = $5 AND id = $6
-       RETURNING *`,
+       RETURNING *, precio_base AS precio`,
       [nombre, precio, descripcion || null, !!activo, empresa_id, id]
     );
 
@@ -118,22 +118,66 @@ router.post("/", auth, async (req, res) => {
   const {
     placa,
     tipo_lavado_id,
+    tipo_lavado,
     precio,
     cliente_id,
     vehiculo_id,
     lavador_id,
+    empleado_id,
     observaciones,
+    notas,
   } = req.body;
 
-  if (!placa || !tipo_lavado_id || !precio) {
+  if (!placa || (!tipo_lavado_id && !tipo_lavado)) {
     return res.status(400).json({
-      error: "Placa, tipo de lavado y precio son obligatorios.",
+      error: "Placa y tipo de lavado son obligatorios.",
     });
   }
 
   try {
+    let tipoLavadoId = tipo_lavado_id || null;
+    let precioFinal = precio || null;
+
+    if (!tipoLavadoId && tipo_lavado) {
+      const nombreTipo = String(tipo_lavado).trim().toUpperCase();
+      const preciosPorTipo = {
+        "BÁSICO": 25000,
+        BASICO: 25000,
+        COMPLETO: 45000,
+        PREMIUM: 65000,
+      };
+
+      const { rows: tipos } = await db.query(
+        `SELECT id, precio_base
+         FROM tipos_lavado
+         WHERE empresa_id = $1 AND UPPER(nombre) = $2
+         LIMIT 1`,
+        [empresa_id, nombreTipo]
+      );
+
+      if (tipos.length > 0) {
+        tipoLavadoId = tipos[0].id;
+        precioFinal = precioFinal || tipos[0].precio_base;
+      } else {
+        const { rows: creado } = await db.query(
+          `INSERT INTO tipos_lavado (empresa_id, nombre, precio_base)
+           VALUES ($1, $2, $3)
+           RETURNING id, precio_base`,
+          [empresa_id, nombreTipo, preciosPorTipo[nombreTipo] || 0]
+        );
+        tipoLavadoId = creado[0].id;
+        precioFinal = precioFinal || creado[0].precio_base;
+      }
+    }
+
+    if (!precioFinal || Number(precioFinal) <= 0) {
+      return res.status(400).json({
+        error: "El tipo de lavado no tiene precio configurado.",
+      });
+    }
+
     const { rows } = await db.query(
-      `INSERT INTO lavados
+      `INSERT INTO lavadero
        (empresa_id, placa, tipo_lavado_id, precio,
         cliente_id, vehiculo_id, lavador_id, observaciones)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -141,12 +185,12 @@ router.post("/", auth, async (req, res) => {
       [
         empresa_id,
         placa,
-        tipo_lavado_id,
-        precio,
+        tipoLavadoId,
+        precioFinal,
         cliente_id || null,
         vehiculo_id || null,
-        lavador_id || null,
-        observaciones || null,
+        lavador_id || empleado_id || null,
+        observaciones || notas || null,
       ]
     );
 
@@ -178,8 +222,10 @@ router.get("/", auth, async (req, res) => {
       `SELECT 
          l.*,
          tl.nombre AS tipo_lavado_nombre,
-         e.nombre AS lavador_nombre
-       FROM lavados l
+         tl.nombre AS tipo_lavado,
+         e.nombre AS lavador_nombre,
+         e.nombre AS empleado_nombre
+       FROM lavadero l
        LEFT JOIN tipos_lavado tl ON tl.id = l.tipo_lavado_id
        LEFT JOIN empleados e ON e.id = l.lavador_id
        WHERE ${where}
@@ -191,6 +237,45 @@ router.get("/", auth, async (req, res) => {
   } catch (err) {
     console.error("🔥 Error listando lavados:", err);
     return res.status(500).json({ error: "Error listando lavados." });
+  }
+});
+
+/**
+ * PATCH /api/lavadero/:id
+ * Alias simple para el frontend: permite cambiar estado con { estado }.
+ */
+router.patch("/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const { id } = req.params;
+  const { estado } = req.body || {};
+
+  const estadosValidos = ["Pendiente", "En_Proceso", "Completado"];
+
+  if (!estado || !estadosValidos.includes(estado)) {
+    return res.status(400).json({
+      error:
+        "Estado inválido. Valores permitidos: Pendiente, En_Proceso, Completado",
+    });
+  }
+
+  try {
+    const { rows } = await db.query(
+      `UPDATE lavadero
+       SET estado = $1,
+           hora_fin = CASE WHEN $1 = 'Completado' THEN NOW() ELSE hora_fin END
+       WHERE empresa_id = $2 AND id = $3
+       RETURNING *`,
+      [estado, empresa_id, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Lavado no encontrado." });
+    }
+
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error("🔥 Error actualizando lavado:", err);
+    return res.status(500).json({ error: "Error actualizando lavado." });
   }
 });
 
@@ -215,7 +300,7 @@ router.patch("/:id/estado", auth, async (req, res) => {
   try {
     // Verificar existencia
     const { rows: existe } = await db.query(
-      `SELECT * FROM lavados
+      `SELECT * FROM lavadero
        WHERE empresa_id = $1 AND id = $2
        LIMIT 1`,
       [empresa_id, id]
@@ -231,7 +316,7 @@ router.patch("/:id/estado", auth, async (req, res) => {
 
     if (estado === "Completado") {
       queryText = `
-        UPDATE lavados
+        UPDATE lavadero
         SET estado = $1,
             hora_fin = NOW()
         WHERE empresa_id = $2 AND id = $3
@@ -239,7 +324,7 @@ router.patch("/:id/estado", auth, async (req, res) => {
       params = [estado, empresa_id, id];
     } else {
       queryText = `
-        UPDATE lavados
+        UPDATE lavadero
         SET estado = $1
         WHERE empresa_id = $2 AND id = $3
         RETURNING *`;
@@ -284,7 +369,7 @@ router.post("/:id/pago", auth, async (req, res) => {
         : null;
 
     const { rows } = await db.query(
-      `UPDATE lavados
+      `UPDATE lavadero
        SET metodo_pago = $1,
            detalle_pago = $2::jsonb
        WHERE empresa_id = $3 AND id = $4
@@ -339,7 +424,7 @@ router.get("/historial", auth, async (req, res) => {
          l.*,
          tl.nombre AS tipo_lavado_nombre,
          e.nombre AS lavador_nombre
-       FROM lavados l
+       FROM lavadero l
        LEFT JOIN tipos_lavado tl ON tl.id = l.tipo_lavado_id
        LEFT JOIN empleados e ON e.id = l.lavador_id
        WHERE ${condiciones.join(" AND ")}
@@ -353,6 +438,75 @@ router.get("/historial", auth, async (req, res) => {
     return res
       .status(500)
       .json({ error: "Error obteniendo historial de lavados." });
+  }
+});
+
+/**
+ * GET /api/lavadero/:id
+ * Obtiene detalles completos de una orden de lavado específica
+ */
+router.get("/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const { id } = req.params;
+
+  try {
+    const { rows } = await db.query(
+      `SELECT
+         l.*,
+         tl.nombre AS tipo_lavado_nombre,
+         tl.descripcion AS tipo_lavado_descripcion,
+         e.nombre AS lavador_nombre,
+         v.placa,
+         v.marca,
+         v.modelo,
+         c.nombre AS cliente_nombre,
+         c.telefono AS cliente_telefono
+       FROM lavadero l
+       LEFT JOIN tipos_lavado tl ON tl.id = l.tipo_lavado_id
+       LEFT JOIN empleados e ON e.id = l.lavador_id
+       LEFT JOIN vehiculos v ON v.id = l.vehiculo_id
+       LEFT JOIN clientes c ON c.id = v.cliente_id
+       WHERE l.empresa_id = $1 AND l.id = $2`,
+      [empresa_id, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Orden de lavado no encontrada." });
+    }
+
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error("🔥 Error obteniendo orden de lavado:", err);
+    return res.status(500).json({ error: "Error obteniendo orden de lavado." });
+  }
+});
+
+/**
+ * PATCH /api/lavadero/:id/lavador
+ * Asigna o cambia el lavador de una orden
+ */
+router.patch("/:id/lavador", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const { id } = req.params;
+  const { lavador_id } = req.body;
+
+  try {
+    const { rows } = await db.query(
+      `UPDATE lavadero
+       SET lavador_id = $1
+       WHERE empresa_id = $2 AND id = $3
+       RETURNING *`,
+      [lavador_id, empresa_id, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Orden de lavado no encontrada." });
+    }
+
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error("🔥 Error asignando lavador:", err);
+    return res.status(500).json({ error: "Error asignando lavador." });
   }
 });
 

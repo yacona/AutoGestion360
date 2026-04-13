@@ -3,8 +3,7 @@
 // Archivo app.js CORREGIDO
 // ======================================================
 
-// 🔧 Cambia esta URL si tu backend usa otro puerto
-const API_BASE_URL = "http://localhost:4000";
+const API_BASE_URL = window.location.origin;
 
 // Keys usadas en localStorage
 const STORAGE = {
@@ -116,10 +115,27 @@ function changeView(view) {
   document.getElementById("current-view-title").textContent = view.toUpperCase();
 
   if (view === "parqueadero") {
-    cargarParqueaderoActivo();   // ✅ nombre correcto
+    cargarParqueaderoActivo();
   }
   if (view === "dashboard") {
     loadDashboard();
+  }
+  if (view === "lavadero") {
+    loadLavaderoEmpleados();
+    cargarOrdeneesLavadero();
+  }
+  if (view === "taller") {
+    loadTallerMecanicos();
+    cargarOrdensTaller();
+  }
+  if (view === "clientes") {
+    cargarListaClientes();
+  }
+  if (view === "empleados") {
+    cargarListaEmpleados();
+  }
+  if (view === "reportes") {
+    setFechasDefecto();
   }
 }
 
@@ -483,11 +499,15 @@ async function handleSalidaClick(event) {
     // Mostrar descuento si aplica
     if (preCalculo.descuento !== "No aplica") {
       document.getElementById("salida-descuento-info").hidden = false;
+      document.getElementById("salida-valor-antes-info").hidden = false;
       document.getElementById("salida-descuento").textContent = preCalculo.descuento;
       document.getElementById("salida-valor-antes").textContent = 
         `$${preCalculo.valor_antes_descuento.toLocaleString("es-CO")} COP`;
     } else {
       document.getElementById("salida-descuento-info").hidden = true;
+      document.getElementById("salida-valor-antes-info").hidden = true;
+      document.getElementById("salida-descuento").textContent = "";
+      document.getElementById("salida-valor-antes").textContent = "";
     }
     
     document.getElementById("salida-valor").textContent = 
@@ -675,6 +695,43 @@ document.addEventListener("DOMContentLoaded", () => {
     .getElementById("pq-tbody")
     ?.addEventListener("click", handleSalidaClick);
 
+  // Lavadero
+  document
+    .getElementById("form-lavadero-nueva")
+    ?.addEventListener("submit", handleNovaLavado);
+
+  document
+    .getElementById("lav-buscar")
+    ?.addEventListener("input", () => cargarOrdeneesLavadero());
+
+  // Taller
+  document
+    .getElementById("form-taller-nueva")
+    ?.addEventListener("submit", handleNuevaOrdenTaller);
+
+  // Clientes
+  document
+    .getElementById("form-cliente-nuevo")
+    ?.addEventListener("submit", handleNuevoCliente);
+
+  document
+    .getElementById("cli-buscar")
+    ?.addEventListener("input", filtrarClientes);
+
+  // Empleados
+  document
+    .getElementById("form-empleado-nuevo")
+    ?.addEventListener("submit", handleNuevoEmpleado);
+
+  document
+    .getElementById("emp-filtro-rol")
+    ?.addEventListener("change", filtrarEmpleadosPorRol);
+
+  // Reportes
+  document
+    .getElementById("form-rep-filtro")
+    ?.addEventListener("submit", handleGenerarReportes);
+
   const token = localStorage.getItem(STORAGE.TOKEN);
   if (token) {
     showMainView();
@@ -692,4 +749,462 @@ function initAfterLogin() {
   if (email) document.getElementById("user-info-label").textContent = email;
 
   changeView("dashboard");
+}
+
+/* ======================================================
+   MÓDULO LAVADERO
+======================================================*/
+async function loadLavaderoEmpleados() {
+  try {
+    const empleados = await apiFetch("/api/empleados?rol=Lavador");
+    const select = document.getElementById("lav-lavador");
+    if (select) {
+      select.innerHTML = '<option value="">Seleccione...</option>';
+      empleados.forEach(emp => {
+        const opt = document.createElement("option");
+        opt.value = emp.id;
+        opt.textContent = emp.nombre;
+        select.appendChild(opt);
+      });
+    }
+  } catch (err) {
+    console.error("Error cargando lavadores:", err);
+  }
+}
+
+async function handleNovaLavado(event) {
+  event.preventDefault();
+  const placa = document.getElementById("lav-placa").value.trim();
+  const tipo = document.getElementById("lav-tipo").value;
+  const lavador_id = document.getElementById("lav-lavador").value;
+  const obs = document.getElementById("lav-obs").value;
+  
+  if (!placa || !tipo || !lavador_id) {
+    showMessage("lav-msg", "Todos los campos obligatorios deben estar completos.", true);
+    return;
+  }
+
+  try {
+    await apiFetch("/api/lavadero", {
+      method: "POST",
+      body: JSON.stringify({ placa, tipo_lavado: tipo, empleado_id: lavador_id, notas: obs }),
+    });
+    showMessage("lav-msg", "Orden de lavado registrada exitosamente.");
+    event.target.reset();
+    cargarOrdeneesLavadero();
+  } catch (err) {
+    showMessage("lav-msg", err.message, true);
+  }
+}
+
+async function cargarOrdeneesLavadero() {
+  try {
+    const ordenes = await apiFetch("/api/lavadero");
+    const activos = ordenes.filter(o => o.estado !== "Completado");
+    const completados = ordenes.filter(o => o.estado === "Completado" && new Date(o.hora_fin || o.creado_en).toDateString() === new Date().toDateString());
+
+    // Tabla activos
+    const tbodyActivos = document.getElementById("lav-activos-tbody");
+    const emptyActivos = document.getElementById("lav-empty");
+    if (tbodyActivos) {
+      tbodyActivos.innerHTML = activos.map(ord => `
+        <tr>
+          <td>${ord.placa}</td>
+          <td>${ord.tipo_lavado}</td>
+          <td>${ord.empleado_nombre || "Sin asignar"}</td>
+          <td>${new Date(ord.hora_inicio).toLocaleString()}</td>
+          <td><span class="badge">${ord.estado}</span></td>
+          <td>
+            <button class="btn btn-sm btn-primary" onclick="marcarLavadoCompleto(${ord.id})">Completar</button>
+          </td>
+        </tr>
+      `).join("");
+      emptyActivos.hidden = activos.length > 0;
+    }
+
+    // Tabla completados
+    const tbodyCompletados = document.getElementById("lav-completados-tbody");
+    const emptyCompletados = document.getElementById("lav-completados-empty");
+    if (tbodyCompletados) {
+      tbodyCompletados.innerHTML = completados.map(ord => `
+        <tr>
+          <td>${ord.placa}</td>
+          <td>${ord.tipo_lavado}</td>
+          <td>${ord.empleado_nombre || "Sin asignar"}</td>
+          <td>${ord.duracion_minutos || "N/A"} min</td>
+          <td>${formatMoney(ord.precio)}</td>
+          <td>${ord.estado_pago || "No pagado"}</td>
+        </tr>
+      `).join("");
+      emptyCompletados.hidden = completados.length > 0;
+    }
+  } catch (err) {
+    console.error("Error cargando órdenes de lavadero:", err);
+  }
+}
+
+async function marcarLavadoCompleto(id) {
+  try {
+    await apiFetch(`/api/lavadero/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ estado: "Completado" }),
+    });
+    cargarOrdeneesLavadero();
+    showMessage("lav-msg", "Lavado marcado como completado.");
+  } catch (err) {
+    showMessage("lav-msg", err.message, true);
+  }
+}
+
+/* ======================================================
+   MÓDULO TALLER
+======================================================*/
+async function loadTallerMecanicos() {
+  try {
+    const empleados = await apiFetch("/api/empleados?rol=Mecánico");
+    const select = document.getElementById("tal-mecanico");
+    if (select) {
+      select.innerHTML = '<option value="">Seleccione...</option>';
+      empleados.forEach(emp => {
+        const opt = document.createElement("option");
+        opt.value = emp.id;
+        opt.textContent = emp.nombre;
+        select.appendChild(opt);
+      });
+    }
+  } catch (err) {
+    console.error("Error cargando mecánicos:", err);
+  }
+}
+
+async function handleNuevaOrdenTaller(event) {
+  event.preventDefault();
+  const placa = document.getElementById("tal-placa").value.trim();
+  const descripcion = document.getElementById("tal-descripcion").value;
+  const mecanico_id = document.getElementById("tal-mecanico").value;
+  const valor = parseFloat(document.getElementById("tal-valor").value);
+  const notas = document.getElementById("tal-notas").value;
+
+  if (!placa || !descripcion || !mecanico_id || !valor) {
+    showMessage("tal-msg", "Todos los campos obligatorios deben estar completos.", true);
+    return;
+  }
+
+  try {
+    await apiFetch("/api/taller", {
+      method: "POST",
+      body: JSON.stringify({ placa, descripcion, empleado_id: mecanico_id, total_general: valor, notas }),
+    });
+    showMessage("tal-msg", "Orden de taller registrada exitosamente.");
+    event.target.reset();
+    cargarOrdensTaller();
+  } catch (err) {
+    showMessage("tal-msg", err.message, true);
+  }
+}
+
+async function cargarOrdensTaller() {
+  try {
+    const ordenes = await apiFetch("/api/taller");
+    const activos = ordenes.filter(o => o.estado !== "Entregado");
+    const completados = ordenes.filter(o => o.estado === "Entregado");
+
+    // Tabla activos
+    const tbodyActivos = document.getElementById("tal-activos-tbody");
+    const emptyActivos = document.getElementById("tal-empty");
+    if (tbodyActivos) {
+      tbodyActivos.innerHTML = activos.map(ord => `
+        <tr>
+          <td>${ord.placa}</td>
+          <td>${ord.descripcion}</td>
+          <td>${ord.empleado_nombre || "Sin asignar"}</td>
+          <td>${formatMoney(ord.total_general)}</td>
+          <td><span class="badge">${ord.estado}</span></td>
+          <td>
+            <button class="btn btn-sm btn-primary" onclick="completarOrdenTaller(${ord.id})">Completar</button>
+          </td>
+        </tr>
+      `).join("");
+      emptyActivos.hidden = activos.length > 0;
+    }
+
+    // Tabla completados
+    const tbodyCompletados = document.getElementById("tal-completados-tbody");
+    const emptyCompletados = document.getElementById("tal-completados-empty");
+    if (tbodyCompletados) {
+      tbodyCompletados.innerHTML = completados.map(ord => `
+        <tr>
+          <td>${ord.placa}</td>
+          <td>${ord.descripcion}</td>
+          <td>${ord.empleado_nombre || "Sin asignar"}</td>
+          <td>${formatMoney(ord.total_general)}</td>
+          <td>${new Date(ord.fecha_entrega).toLocaleDateString()}</td>
+        </tr>
+      `).join("");
+      emptyCompletados.hidden = completados.length > 0;
+    }
+  } catch (err) {
+    console.error("Error cargando órdenes de taller:", err);
+  }
+}
+
+async function completarOrdenTaller(id) {
+  try {
+    await apiFetch(`/api/taller/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ estado: "Entregado" }),
+    });
+    cargarOrdensTaller();
+    showMessage("tal-msg", "Orden marcada como completada.");
+  } catch (err) {
+    showMessage("tal-msg", err.message, true);
+  }
+}
+
+/* ======================================================
+   MÓDULO CLIENTES
+======================================================*/
+async function handleNuevoCliente(event) {
+  event.preventDefault();
+  const nombre = document.getElementById("cli-nombre").value.trim();
+  const documento = document.getElementById("cli-documento").value.trim();
+  const telefono = document.getElementById("cli-telefono").value.trim();
+  const email = document.getElementById("cli-email").value.trim();
+
+  if (!nombre) {
+    showMessage("cli-msg", "El nombre es obligatorio.", true);
+    return;
+  }
+
+  try {
+    await apiFetch("/api/clientes", {
+      method: "POST",
+      body: JSON.stringify({ nombre, documento: documento || null, telefono: telefono || null, correo: email || null }),
+    });
+    showMessage("cli-msg", "Cliente registrado exitosamente.");
+    event.target.reset();
+    cargarListaClientes();
+  } catch (err) {
+    showMessage("cli-msg", err.message, true);
+  }
+}
+
+async function cargarListaClientes() {
+  try {
+    const clientes = await apiFetch("/api/clientes");
+    const tbody = document.getElementById("cli-lista-tbody");
+    const empty = document.getElementById("cli-lista-empty");
+
+    if (tbody) {
+      tbody.innerHTML = clientes.map(cli => `
+        <tr>
+          <td>${cli.nombre}</td>
+          <td>${cli.documento || "N/A"}</td>
+          <td>${cli.telefono || "N/A"}</td>
+          <td>${cli.correo || "N/A"}</td>
+          <td>${cli.total_servicios || 0}</td>
+          <td>${new Date(cli.fecha_registro).toLocaleDateString()}</td>
+          <td>
+            <button class="btn btn-sm btn-secondary" onclick="verDetallesCliente(${cli.id})">Ver</button>
+          </td>
+        </tr>
+      `).join("");
+      empty.hidden = clientes.length > 0;
+    }
+  } catch (err) {
+    console.error("Error cargando clientes:", err);
+  }
+}
+
+function filtrarClientes() {
+  const buscar = document.getElementById("cli-buscar").value.toLowerCase();
+  const filas = document.querySelectorAll("#cli-lista-tbody tr");
+  filas.forEach(fila => {
+    const texto = fila.textContent.toLowerCase();
+    fila.style.display = texto.includes(buscar) ? "" : "none";
+  });
+}
+
+async function verDetallesCliente(id) {
+  try {
+    const cliente = await apiFetch(`/api/clientes/${id}`);
+    alert(`Cliente: ${cliente.cliente.nombre}\nTeléfono: ${cliente.cliente.telefono}\nEmail: ${cliente.cliente.correo}\nTotal gastado: ${formatMoney(cliente.estadisticas.total_gastado)}`);
+  } catch (err) {
+    alert("Error cargando detalles: " + err.message);
+  }
+}
+
+/* ======================================================
+   MÓDULO EMPLEADOS
+======================================================*/
+async function handleNuevoEmpleado(event) {
+  event.preventDefault();
+  const nombre = document.getElementById("emp-nombre").value.trim();
+  const rol = document.getElementById("emp-rol").value;
+  const telefono = document.getElementById("emp-telefono").value.trim();
+  const email = document.getElementById("emp-email").value.trim();
+
+  if (!nombre || !rol) {
+    showMessage("emp-msg", "Nombre y rol son obligatorios.", true);
+    return;
+  }
+
+  try {
+    await apiFetch("/api/empleados", {
+      method: "POST",
+      body: JSON.stringify({ nombre, rol, telefono: telefono || null, email: email || null }),
+    });
+    showMessage("emp-msg", "Empleado registrado exitosamente.");
+    event.target.reset();
+    cargarListaEmpleados();
+    loadLavaderoEmpleados();
+    loadTallerMecanicos();
+  } catch (err) {
+    showMessage("emp-msg", err.message, true);
+  }
+}
+
+async function cargarListaEmpleados() {
+  try {
+    const empleados = await apiFetch("/api/empleados");
+    const tbody = document.getElementById("emp-lista-tbody");
+    const empty = document.getElementById("emp-lista-empty");
+
+    if (tbody) {
+      tbody.innerHTML = empleados.map(emp => `
+        <tr>
+          <td>${emp.nombre}</td>
+          <td>${emp.rol}</td>
+          <td>${emp.telefono || "N/A"}</td>
+          <td>${emp.email || "N/A"}</td>
+          <td>${new Date(emp.fecha_registro || emp.created_at).toLocaleDateString()}</td>
+          <td>
+            <button class="btn btn-sm btn-danger" onclick="desactivarEmpleado(${emp.id})">Desactivar</button>
+          </td>
+        </tr>
+      `).join("");
+      empty.hidden = empleados.length > 0;
+    }
+  } catch (err) {
+    console.error("Error cargando empleados:", err);
+  }
+}
+
+function filtrarEmpleadosPorRol() {
+  const rol = document.getElementById("emp-filtro-rol").value;
+  const filas = document.querySelectorAll("#emp-lista-tbody tr");
+  filas.forEach(fila => {
+    const texto = fila.cells[1].textContent.toLowerCase();
+    fila.style.display = !rol || texto.includes(rol.toLowerCase()) ? "" : "none";
+  });
+}
+
+async function desactivarEmpleado(id) {
+  if (!confirm("¿Desactivar este empleado?")) return;
+  try {
+    await apiFetch(`/api/empleados/${id}`, {
+      method: "DELETE",
+    });
+    cargarListaEmpleados();
+    showMessage("emp-msg", "Empleado desactivado.");
+  } catch (err) {
+    showMessage("emp-msg", err.message, true);
+  }
+}
+
+/* ======================================================
+   MÓDULO REPORTES
+======================================================*/
+function setFechasDefecto() {
+  const hoy = new Date();
+  const hace30 = new Date(hoy);
+  hace30.setDate(hace30.getDate() - 30);
+
+  document.getElementById("rep-desde").valueAsDate = hace30;
+  document.getElementById("rep-hasta").valueAsDate = hoy;
+}
+
+async function handleGenerarReportes(event) {
+  event.preventDefault();
+  const desde = document.getElementById("rep-desde").value;
+  const hasta = document.getElementById("rep-hasta").value;
+
+  if (!desde || !hasta) {
+    alert("Seleccione rango de fechas.");
+    return;
+  }
+
+  try {
+    const resumen = await apiFetch(`/api/reportes/resumen?desde=${desde}&hasta=${hasta}`);
+    const diario = await apiFetch(`/api/reportes/diario?desde=${desde}&hasta=${hasta}`);
+    const clientes = await apiFetch(`/api/reportes/clientes?desde=${desde}&hasta=${hasta}`);
+    const empleados = await apiFetch(`/api/reportes/empleados?desde=${desde}&hasta=${hasta}`);
+
+    // Mostrar resumen
+    document.getElementById("rep-pq-total").textContent = formatMoney(resumen.parqueadero.total);
+    document.getElementById("rep-pq-cant").textContent = `${resumen.parqueadero.cantidad} servicios`;
+    document.getElementById("rep-lav-total").textContent = formatMoney(resumen.lavadero.total);
+    document.getElementById("rep-lav-cant").textContent = `${resumen.lavadero.cantidad} servicios`;
+    document.getElementById("rep-tal-total").textContent = formatMoney(resumen.taller.total);
+    document.getElementById("rep-tal-cant").textContent = `${resumen.taller.cantidad} servicios`;
+    document.getElementById("rep-total").textContent = formatMoney(resumen.total_general);
+    document.getElementById("rep-cant-total").textContent = `${resumen.cantidad_total} servicios`;
+
+    // Mostrar diario
+    const tbodyDiario = document.getElementById("rep-diario-tbody");
+    if (tbodyDiario) {
+      tbodyDiario.innerHTML = diario.dias.map(dia => `
+        <tr>
+          <td>${dia.fecha}</td>
+          <td>${formatMoney(dia.parqueadero.total)}</td>
+          <td>${formatMoney(dia.lavadero.total)}</td>
+          <td>${formatMoney(dia.taller.total)}</td>
+          <td><strong>${formatMoney(dia.total_general)}</strong></td>
+        </tr>
+      `).join("");
+      document.getElementById("rep-diario-empty").hidden = diario.dias.length > 0;
+    }
+
+    // Mostrar clientes
+    const tbodyClientes = document.getElementById("rep-clientes-tbody");
+    if (tbodyClientes) {
+      tbodyClientes.innerHTML = clientes.clientes.map(cli => `
+        <tr>
+          <td>${cli.nombre}</td>
+          <td>${cli.total_servicios}</td>
+          <td>${formatMoney(cli.total_gastado)}</td>
+        </tr>
+      `).join("");
+      document.getElementById("rep-clientes-empty").hidden = clientes.clientes.length > 0;
+    }
+
+    // Mostrar empleados
+    const tbodyEmpleados = document.getElementById("rep-empleados-tbody");
+    if (tbodyEmpleados) {
+      tbodyEmpleados.innerHTML = empleados.empleados.map(emp => `
+        <tr>
+          <td>${emp.nombre}</td>
+          <td>${emp.rol}</td>
+          <td>${Math.max(emp.lavados_realizados || 0, emp.ordenes_taller || 0)}</td>
+          <td>${formatMoney(emp.total_general)}</td>
+        </tr>
+      `).join("");
+      document.getElementById("rep-empleados-empty").hidden = empleados.empleados.length > 0;
+    }
+  } catch (err) {
+    alert("Error generando reportes: " + err.message);
+  }
+}
+
+/* ======================================================
+   UTILIDADES
+======================================================*/
+function showMessage(elementId, message, isError = false) {
+  const el = document.getElementById(elementId);
+  if (el) {
+    el.textContent = message;
+    el.className = "small-message " + (isError ? "error" : "ok");
+    el.hidden = false;
+    setTimeout(() => (el.hidden = true), 4000);
+  }
 }

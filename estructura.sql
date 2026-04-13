@@ -279,8 +279,14 @@ CREATE TABLE public.parqueadero (
     metodo_pago character varying(30),
     detalle_pago text,
     observaciones text,
+    creado_en timestamp with time zone DEFAULT now() NOT NULL,
+    conductor_nombre character varying(150),
+    conductor_documento character varying(40),
+    conductor_telefono character varying(40),
     evidencia_url text,
-    creado_en timestamp with time zone DEFAULT now() NOT NULL
+    estado_pago character varying(30),
+    usuario_registro_id bigint,
+    cantidad_fotos integer
 );
 
 
@@ -888,4 +894,3 @@ ALTER TABLE ONLY public.vehiculos
 --
 
 \unrestrict 5IqoTc6OsedrCuJuefpjDmvXmL22fo565zSoYnVfhTwQphTCqE1T49k6toVk672
-

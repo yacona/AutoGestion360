@@ -29,6 +29,7 @@ app.use(express.json());
 
 // Servir archivos estáticos del frontend
 app.use(express.static("frontend"));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // Ruta de prueba
 app.get("/api/ping", (req, res) => {

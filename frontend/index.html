@@ -157,7 +157,7 @@
         <section id="view-parqueadero" class="view">
           <div class="cards-grid">
             <!-- Formulario de entrada -->
-            <div class="card" card-full>
+            <div class="card card-full">
               <h3>Registrar entrada</h3>
               <form id="form-parqueadero-entrada">
                 <div class="form-row">
@@ -237,12 +237,12 @@
                   </button>
                 </div>
                 <div id="pq-msg" class="small-message" hidden></div>
-                <div id="pq-historial" class="small-message hidden"></div>
+                <div id="pq-historial" class="small-message" hidden></div>
               </form>
             </div>
 
             <!-- Vehículos activos -->
-            <div class="card" card-expand>
+            <div class="card card-expand">
               <h3>Vehículos en parqueadero</h3>
               <div class="table-wrapper">
                 <table class="table">
@@ -269,38 +269,404 @@
         </section>
 
 
+        <!-- MÓDULO LAVADERO -->
         <section id="view-lavadero" class="view">
-          <div class="card">
-            <h3>Módulo de Lavadero</h3>
-            <p>En construcción: órdenes de lavado, control de lavadores y tipos de lavado.</p>
+          <div class="cards-grid">
+            <!-- Nueva orden de lavado -->
+            <div class="card card-full">
+              <h3>Registrar nueva orden de lavado</h3>
+              <form id="form-lavadero-nueva">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="lav-placa">Placa del vehículo *</label>
+                    <input type="text" id="lav-placa" placeholder="ABC123" required maxlength="10" />
+                  </div>
+                  <div class="form-group">
+                    <label for="lav-tipo">Tipo de lavado *</label>
+                    <select id="lav-tipo" required>
+                      <option value="">Seleccione...</option>
+                      <option value="BÁSICO">Básico - $25.000</option>
+                      <option value="COMPLETO">Completo - $45.000</option>
+                      <option value="PREMIUM">Premium - $65.000</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="lav-lavador">Asignar lavador *</label>
+                    <select id="lav-lavador" required></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="lav-obs">Observaciones</label>
+                    <textarea id="lav-obs" rows="2" placeholder="Notas especiales..."></textarea>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Registrar lavado</button>
+                <div id="lav-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <!-- Órdenes activas -->
+            <div class="card card-expand">
+              <h3>Órdenes de lavado en curso</h3>
+              <div class="search-bar">
+                <input type="text" id="lav-buscar" placeholder="Buscar por placa o lavador..." />
+              </div>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Placa</th>
+                      <th>Tipo</th>
+                      <th>Lavador</th>
+                      <th>Inicio</th>
+                      <th>Estado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="lav-activos-tbody"></tbody>
+                </table>
+                <div id="lav-empty" class="table-empty">No hay órdenes activas.</div>
+              </div>
+            </div>
+
+            <!-- Historial completado -->
+            <div class="card card-expand">
+              <h3>Órdenes completadas hoy</h3>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Placa</th>
+                      <th>Tipo</th>
+                      <th>Lavador</th>
+                      <th>Duracion</th>
+                      <th>Precio</th>
+                      <th>Pago</th>
+                    </tr>
+                  </thead>
+                  <tbody id="lav-completados-tbody"></tbody>
+                </table>
+                <div id="lav-completados-empty" class="table-empty">No hay órdenes completadas hoy.</div>
+              </div>
+            </div>
           </div>
         </section>
 
+        <!-- MÓDULO TALLER -->
         <section id="view-taller" class="view">
-          <div class="card">
-            <h3>Módulo de Taller</h3>
-            <p>En construcción: órdenes de trabajo, repuestos y mano de obra.</p>
+          <div class="cards-grid">
+            <!-- Nueva orden de taller -->
+            <div class="card card-full">
+              <h3>Registrar nueva orden de taller</h3>
+              <form id="form-taller-nueva">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="tal-placa">Placa del vehículo *</label>
+                    <input type="text" id="tal-placa" placeholder="ABC123" required maxlength="10" />
+                  </div>
+                  <div class="form-group">
+                    <label for="tal-descripcion">Descripción del trabajo *</label>
+                    <input type="text" id="tal-descripcion" placeholder="Ej: Cambio de aceite" required />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="tal-mecanico">Asignar mecánico *</label>
+                    <select id="tal-mecanico" required></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="tal-valor">Valor estimado (COP) *</label>
+                    <input type="number" id="tal-valor" placeholder="150000" required min="0" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="tal-notas">Notas y observaciones</label>
+                  <textarea id="tal-notas" rows="3" placeholder="Detalles adicionales..."></textarea>
+                </div>
+                <button type="submit" class="btn btn-primary">Crear orden</button>
+                <div id="tal-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <!-- Órdenes activas -->
+            <div class="card card-expand">
+              <h3>Órdenes de taller activas</h3>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Placa</th>
+                      <th>Descripción</th>
+                      <th>Mecánico</th>
+                      <th>Valor</th>
+                      <th>Estado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="tal-activos-tbody"></tbody>
+                </table>
+                <div id="tal-empty" class="table-empty">No hay órdenes activas.</div>
+              </div>
+            </div>
+
+            <!-- Órdenes completadas -->
+            <div class="card card-expand">
+              <h3>Órdenes completadas</h3>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Placa</th>
+                      <th>Descripción</th>
+                      <th>Mecánico</th>
+                      <th>Valor</th>
+                      <th>Fecha</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tal-completados-tbody"></tbody>
+                </table>
+                <div id="tal-completados-empty" class="table-empty">No hay órdenes completadas.</div>
+              </div>
+            </div>
           </div>
         </section>
 
+        <!-- MÓDULO CLIENTES -->
         <section id="view-clientes" class="view">
-          <div class="card">
-            <h3>Clientes</h3>
-            <p>Administra tus clientes y su historial de servicios.</p>
+          <div class="cards-grid">
+            <!-- Nuevo cliente -->
+            <div class="card card-full">
+              <h3>Registrar nuevo cliente</h3>
+              <form id="form-cliente-nuevo">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="cli-nombre">Nombre *</label>
+                    <input type="text" id="cli-nombre" placeholder="Juan Pérez" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="cli-documento">Documento (cédula/NIT)</label>
+                    <input type="text" id="cli-documento" placeholder="1234567890" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="cli-telefono">Teléfono</label>
+                    <input type="tel" id="cli-telefono" placeholder="3001234567" />
+                  </div>
+                  <div class="form-group">
+                    <label for="cli-email">Email</label>
+                    <input type="email" id="cli-email" placeholder="juan@example.com" />
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Registrar cliente</button>
+                <div id="cli-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <!-- Lista de clientes -->
+            <div class="card card-expand">
+              <h3>Clientes registrados</h3>
+              <div class="search-bar">
+                <input type="text" id="cli-buscar" placeholder="Buscar por nombre o documento..." />
+              </div>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th>Documento</th>
+                      <th>Teléfono</th>
+                      <th>Email</th>
+                      <th>Servicios</th>
+                      <th>Registrado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="cli-lista-tbody"></tbody>
+                </table>
+                <div id="cli-lista-empty" class="table-empty">No hay clientes registrados.</div>
+              </div>
+            </div>
           </div>
         </section>
 
+        <!-- MÓDULO EMPLEADOS -->
         <section id="view-empleados" class="view">
-          <div class="card">
-            <h3>Empleados</h3>
-            <p>Administra lavadores, mecánicos, cajeros y otros roles.</p>
+          <div class="cards-grid">
+            <!-- Nuevo empleado -->
+            <div class="card card-full">
+              <h3>Registrar nuevo empleado</h3>
+              <form id="form-empleado-nuevo">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="emp-nombre">Nombre completo *</label>
+                    <input type="text" id="emp-nombre" placeholder="Carlos Gómez" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="emp-rol">Rol *</label>
+                    <select id="emp-rol" required>
+                      <option value="">Seleccione...</option>
+                      <option value="Lavador">Lavador</option>
+                      <option value="Mecánico">Mecánico</option>
+                      <option value="Cajero">Cajero</option>
+                      <option value="Administrador">Administrador</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="emp-telefono">Teléfono</label>
+                    <input type="tel" id="emp-telefono" placeholder="3001234567" />
+                  </div>
+                  <div class="form-group">
+                    <label for="emp-email">Email</label>
+                    <input type="email" id="emp-email" placeholder="carlos@empresa.com" />
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Registrar empleado</button>
+                <div id="emp-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <!-- Lista de empleados -->
+            <div class="card card-expand">
+              <h3>Empleados activos</h3>
+              <div class="filter-bar">
+                <select id="emp-filtro-rol" aria-label="Filtrar empleados por rol" title="Filtrar empleados por rol">
+                  <option value="">Todos los roles</option>
+                  <option value="Lavador">Lavadores</option>
+                  <option value="Mecánico">Mecánicos</option>
+                  <option value="Cajero">Cajeros</option>
+                  <option value="Administrador">Administradores</option>
+                </select>
+              </div>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th>Rol</th>
+                      <th>Teléfono</th>
+                      <th>Email</th>
+                      <th>Registrado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="emp-lista-tbody"></tbody>
+                </table>
+                <div id="emp-lista-empty" class="table-empty">No hay empleados registrados.</div>
+              </div>
+            </div>
           </div>
         </section>
 
+        <!-- MÓDULO REPORTES -->
         <section id="view-reportes" class="view">
-          <div class="card">
-            <h3>Reportes</h3>
-            <p>Visualiza reportes más detallados por rango de fechas.</p>
+          <div class="cards-grid">
+            <!-- Selector de rango de fechas -->
+            <div class="card card-full">
+              <h3>Filtro de reportes</h3>
+              <form id="form-rep-filtro">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="rep-desde">Desde</label>
+                    <input type="date" id="rep-desde" />
+                  </div>
+                  <div class="form-group">
+                    <label for="rep-hasta">Hasta</label>
+                    <input type="date" id="rep-hasta" />
+                  </div>
+                  <div class="form-group">
+                    <button type="submit" class="btn btn-primary">Generar reportes</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- Resumen general -->
+            <div class="card">
+              <h3>Resumen de ingresos</h3>
+              <div class="stats-grid">
+                <div class="stat-box">
+                  <span class="stat-label">Parqueadero</span>
+                  <span id="rep-pq-total" class="stat-value">$ 0</span>
+                  <span id="rep-pq-cant" class="stat-detail">0 servicios</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Lavadero</span>
+                  <span id="rep-lav-total" class="stat-value">$ 0</span>
+                  <span id="rep-lav-cant" class="stat-detail">0 servicios</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Taller</span>
+                  <span id="rep-tal-total" class="stat-value">$ 0</span>
+                  <span id="rep-tal-cant" class="stat-detail">0 servicios</span>
+                </div>
+                <div class="stat-box highlight">
+                  <span class="stat-label">Total General</span>
+                  <span id="rep-total" class="stat-value">$ 0</span>
+                  <span id="rep-cant-total" class="stat-detail">0 servicios</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Reporte diario -->
+            <div class="card card-expand">
+              <h3>Ingresos por día</h3>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Parqueadero</th>
+                      <th>Lavadero</th>
+                      <th>Taller</th>
+                      <th>Total</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rep-diario-tbody"></tbody>
+                </table>
+                <div id="rep-diario-empty" class="table-empty">Sin datos para el rango seleccionado.</div>
+              </div>
+            </div>
+
+            <!-- Clientes más activos -->
+            <div class="card card-expand">
+              <h3>Clientes más activos</h3>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Servicios</th>
+                      <th>Total gastado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rep-clientes-tbody"></tbody>
+                </table>
+                <div id="rep-clientes-empty" class="table-empty">Sin datos para el rango seleccionado.</div>
+              </div>
+            </div>
+
+            <!-- Empleados más productivos -->
+            <div class="card card-expand">
+              <h3>Empleados más productivos</h3>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Empleado</th>
+                      <th>Rol</th>
+                      <th>Servicios</th>
+                      <th>Ingresos</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rep-empleados-tbody"></tbody>
+                </table>
+                <div id="rep-empleados-empty" class="table-empty">Sin datos para el rango seleccionado.</div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -373,7 +739,7 @@
             <strong>Descuento:</strong>
             <span id="salida-descuento"></span>
           </div>
-          <div>
+          <div id="salida-valor-antes-info" hidden>
             <strong>Valor antes de descuento:</strong>
             <span id="salida-valor-antes"></span>
           </div>
@@ -388,11 +754,12 @@
       <div class="form-section">
         <h4>Método de pago *</h4>
         <div class="form-group">
-          <select id="pq-metodo-pago" required>
+          <select id="pq-metodo-pago" aria-label="Método de pago" title="Método de pago" required>
             <option value="">-- Seleccione método de pago --</option>
             <option value="EFECTIVO">💵 Efectivo</option>
             <option value="TARJETA">💳 Tarjeta débito/crédito</option>
             <option value="TRANSFERENCIA">📱 Transferencia bancaria</option>
+            <option value="MIXTO">💰 Pago mixto</option>
             <option value="OTRO">❓ Otro método</option>
           </select>
         </div>
@@ -421,7 +788,7 @@
 
       <!-- Botón para editar datos antes de confirmar -->
       <div class="form-section">
-        <button class="btn btn-ghost btn-sm" onclick="toggleEditarRegistro()">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleEditarRegistro()">
           ✏️ Editar datos del registro
         </button>
       </div>
@@ -449,15 +816,15 @@
             <option value="CUATRIMOTO">CUATRIMOTO</option>
           </select>
         </div>
-        <button class="btn btn-secondary btn-sm" onclick="guardarEdicionRegistro()">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="guardarEdicionRegistro()">
           💾 Guardar cambios
         </button>
       </div>
     </div>
 
     <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="cerrarModalSalida()">Cancelar</button>
-      <button class="btn btn-primary btn-lg" onclick="confirmarSalida()">✓ Confirmar salida y pago</button>
+      <button type="button" class="btn btn-secondary" onclick="cerrarModalSalida()">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-lg" onclick="confirmarSalida()">✓ Confirmar salida y pago</button>
     </div>
   </div>
 </div>
