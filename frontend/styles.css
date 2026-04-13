@@ -159,6 +159,14 @@ body {
   border-radius: 999px;
 }
 
+/* Contenedor de acciones del formulario */
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 1rem;
+}
+
 /* Botón Registrar salida */
 
 .btn-salida {

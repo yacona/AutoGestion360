@@ -123,6 +123,38 @@ function changeView(view) {
   }
 }
 
+// Función para limpiar el formulario de parqueadero
+function limpiarFormularioParqueadero() {
+  const placaEl = document.getElementById("pq-placa");
+  const tipoEl = document.getElementById("pq-tipo");
+  const nombreEl = document.getElementById("pq-nombre");
+  const telEl = document.getElementById("pq-telefono");
+  const propEl = document.getElementById("pq-es-propietario");
+  const obsEl = document.getElementById("pq-obs");
+  const evidenciaEl = document.getElementById("pq-evidencia");
+  const msgEl = document.getElementById("pq-msg");
+  const histEl = document.getElementById("pq-historial");
+
+  // Limpiar todos los campos
+  if (placaEl) placaEl.value = "";
+  if (tipoEl) tipoEl.value = "CARRO"; // Resetear al valor por defecto
+  if (nombreEl) nombreEl.value = "";
+  if (telEl) telEl.value = "";
+  if (obsEl) obsEl.value = "";
+  if (evidenciaEl) evidenciaEl.value = "";
+  if (propEl) propEl.checked = true; // Resetear a "es propietario" por defecto
+
+  // Limpiar mensajes
+  if (msgEl) {
+    msgEl.hidden = true;
+    msgEl.textContent = "";
+  }
+  if (histEl) {
+    histEl.hidden = true;
+    histEl.textContent = "";
+  }
+}
+
 /* ======================================================
    DASHBOARD
 ======================================================*/
