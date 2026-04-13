@@ -380,31 +380,195 @@ async function cargarParqueaderoActivo() {
 }
 
 /* ======================================================
-   PARQUEADERO — REGISTRO DE SALIDA (simple)
+   PARQUEADERO — REGISTRO DE SALIDA (MEJORADO)
+   Ahora solicita pago y permite editar datos antes de confirmar
 ======================================================*/
+
+// Variable global para almacenar datos de pre-salida
+let datosPreSalida = null;
+let registroId = null;
+
 async function handleSalidaClick(event) {
   const btn = event.target.closest(".pq-salida");
   if (!btn) return;
 
   const tr = btn.closest("tr");
-  const id = tr?.dataset.id;
-  if (!id) return;
-
-  if (!confirm("¿Registrar salida de este vehículo?")) return;
+  registroId = tr?.dataset.id;
+  if (!registroId) return;
 
   try {
-    await apiFetch(`/api/parqueadero/salida/${id}`, {
+    // 1) Obtener pre-cálculo de salida
+    const preCalculo = await apiFetch(`/api/parqueadero/${registroId}/pre-salida`, {
       method: "POST",
-      body: JSON.stringify({ metodo_pago: null, detalle_pago: null }),
     });
 
-    await cargarParqueaderoActivo();   // ✅ recarga listado
-    await loadDashboard();             // opcional, refresca contador
+    datosPreSalida = preCalculo;
+
+    // 2) Llenar modal con datos
+    document.getElementById("salida-placa").textContent = preCalculo.placa || "—";
+    document.getElementById("salida-tipo").textContent = preCalculo.tipo_vehiculo || "—";
+    document.getElementById("salida-cliente").textContent = preCalculo.cliente || "—";
+    document.getElementById("salida-hora-entrada").textContent = preCalculo.hora_entrada || "—";
+    document.getElementById("salida-hora-salida").textContent = preCalculo.hora_salida || "—";
+    document.getElementById("salida-tiempo").textContent = preCalculo.tiempo_estancia || "—";
+    document.getElementById("salida-tarifa").textContent = preCalculo.tarifa_aplicada || "—";
+    
+    // Mostrar descuento si aplica
+    if (preCalculo.descuento !== "No aplica") {
+      document.getElementById("salida-descuento-info").hidden = false;
+      document.getElementById("salida-descuento").textContent = preCalculo.descuento;
+      document.getElementById("salida-valor-antes").textContent = 
+        `$${preCalculo.valor_antes_descuento.toLocaleString("es-CO")} COP`;
+    } else {
+      document.getElementById("salida-descuento-info").hidden = true;
+    }
+    
+    document.getElementById("salida-valor").textContent = 
+      `$${preCalculo.valor_a_cobrar.toLocaleString("es-CO")} COP`;
+
+    // 3) Limpiar campos de pago
+    document.getElementById("pq-metodo-pago").value = "";
+    document.getElementById("pq-referencia").value = "";
+    document.getElementById("pq-detalle-pago").value = "";
+    document.getElementById("pq-obs-salida").value = "";
+
+    // Limpiar form de edición
+    document.getElementById("edit-placa").value = preCalculo.placa || "";
+    document.getElementById("edit-cliente").value = preCalculo.cliente || "";
+    document.getElementById("edit-tipo").value = preCalculo.tipo_vehiculo || "";
+    document.getElementById("salida-editar").hidden = true;
+
+    // 4) Mostrar modal
+    document.getElementById("modal-salida").classList.remove("hidden");
+  } catch (err) {
+    console.error("Error obteniendo pre-salida:", err);
+    alert(err.message || "Error calculando salida.");
+  }
+}
+
+function cerrarModalSalida() {
+  document.getElementById("modal-salida").classList.add("hidden");
+  datosPreSalida = null;
+  registroId = null;
+}
+
+function toggleEditarRegistro() {
+  const seccionEditar = document.getElementById("salida-editar");
+  seccionEditar.hidden = !seccionEditar.hidden;
+}
+
+async function guardarEdicionRegistro() {
+  if (!registroId) return;
+
+  const cambios = {};
+  
+  const placanueva = document.getElementById("edit-placa").value.trim();
+  if (placanueva && placanueva !== datosPreSalida.placa) {
+    cambios.placa = placanueva;
+  }
+
+  const clientenuevo = document.getElementById("edit-cliente").value.trim();
+  if (clientenuevo && clientenuevo !== datosPreSalida.cliente) {
+    cambios.nombre_cliente = clientenuevo;
+  }
+
+  const tiponuevo = document.getElementById("edit-tipo").value.trim();
+  if (tiponuevo && tiponuevo !== datosPreSalida.tipo_vehiculo) {
+    cambios.tipo_vehiculo = tiponuevo;
+  }
+
+  if (Object.keys(cambios).length === 0) {
+    alert("No hay cambios para guardar.");
+    return;
+  }
+
+  try {
+    await apiFetch(`/api/parqueadero/${registroId}`, {
+      method: "PATCH",
+      body: JSON.stringify(cambios),
+    });
+
+    alert("Registro actualizado exitosamente.");
+    
+    // Recargar pre-salida con nuevos datos
+    const preCalculo = await apiFetch(`/api/parqueadero/${registroId}/pre-salida`, {
+      method: "POST",
+    });
+    datosPreSalida = preCalculo;
+    
+    // Actualizar display
+    document.getElementById("salida-placa").textContent = preCalculo.placa || "—";
+    document.getElementById("salida-tipo").textContent = preCalculo.tipo_vehiculo || "—";
+    document.getElementById("salida-cliente").textContent = preCalculo.cliente || "—";
+
+    document.getElementById("salida-editar").hidden = true;
+  } catch (err) {
+    console.error("Error actualizando registro:", err);
+    alert(err.message || "Error actualizando registro.");
+  }
+}
+
+async function confirmarSalida() {
+  if (!registroId || !datosPreSalida) {
+    alert("Error: datos no disponibles.");
+    return;
+  }
+
+  const metodoPago = document.getElementById("pq-metodo-pago").value.trim();
+  if (!metodoPago) {
+    alert("Debe seleccionar un método de pago.");
+    return;
+  }
+
+  const referencia = document.getElementById("pq-referencia").value.trim() || null;
+  const detallePago = document.getElementById("pq-detalle-pago").value.trim() || null;
+  const observacionesSalida = document.getElementById("pq-obs-salida").value.trim() || null;
+
+  try {
+    await apiFetch(`/api/parqueadero/salida/${registroId}`, {
+      method: "POST",
+      body: JSON.stringify({
+        metodo_pago: metodoPago,
+        referencia_transaccion: referencia,
+        detalle_pago: detallePago,
+        observaciones: observacionesSalida,
+      }),
+    });
+
+    alert("✓ Salida registrada correctamente y pago confirmado.");
+    cerrarModalSalida();
+
+    // Recargar tabla de activos
+    await cargarParqueaderoActivo();
+    await loadDashboard();
   } catch (err) {
     console.error("Error registrando salida:", err);
     alert(err.message || "Error registrando salida.");
   }
 }
+
+// Mostrar/ocultar campos adicionales según método de pago
+document.addEventListener("DOMContentLoaded", function() {
+  const selectPago = document.getElementById("pq-metodo-pago");
+  if (selectPago) {
+    selectPago.addEventListener("change", function() {
+      const referenciaGroup = document.getElementById("pq-referencia-group");
+      const detalleGroup = document.getElementById("pq-detalle-pago-group");
+      
+      if (this.value === "TARJETA" || this.value === "TRANSFERENCIA") {
+        referenciaGroup.hidden = false;
+      } else {
+        referenciaGroup.hidden = true;
+      }
+      
+      if (this.value === "OTRO" || this.value === "MIXTO") {
+        detalleGroup.hidden = false;
+      } else {
+        detalleGroup.hidden = true;
+      }
+    });
+  }
+});
 
 /* ======================================================
    FORZAR MAYÚSCULAS EN ENTRADAS

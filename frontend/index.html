@@ -309,36 +309,150 @@
     </div>
   </div>
 
- <!-- Modal de salida -->
+ <!-- Modal mejorado de salida con confirmación de pago y opción de editar -->
 <div id="modal-salida" class="modal hidden">
-  <div class="modal-content">
-    <h3>Registrar salida</h3>
-
-    <p><strong>Placa:</strong> <span id="salida-placa"></span></p>
-    <p><strong>Tiempo:</strong> <span id="salida-tiempo"></span></p>
-    <p><strong>Valor a pagar:</strong> <span id="salida-valor"></span></p>
-
-    <div class="form-group">
-      <label for="pq-metodo-pago">Método de pago *</label>
-      <select id="pq-metodo-pago" required>
-        <option value="">Seleccione...</option>
-        <option value="EFECTIVO">Efectivo</option>
-        <option value="TRANSFERENCIA">Transferencia</option>
-        <option value="DEBITO">Tarjeta débito</option>
-        <option value="CREDITO">Tarjeta crédito</option>
-        <option value="MIXTO">Mixto</option>
-      </select>
+  <div class="modal-content modal-lg">
+    <div class="modal-header">
+      <h3>Confirmar salida y registrar pago</h3>
+      <button class="modal-close" onclick="cerrarModalSalida()">✕</button>
     </div>
 
-    <div class="form-group" id="pq-detalle-pago-group" hidden>
-      <label for="pq-detalle-pago">Detalle del pago</label>
-      <textarea id="pq-detalle-pago"
-        placeholder="Ej: 20.000 efectivo + 10.000 transferencia"></textarea>
+    <div id="salida-resumen" class="modal-body">
+      <!-- Información del vehículo -->
+      <div class="form-section">
+        <h4>Datos del vehículo</h4>
+        <div class="info-grid">
+          <div>
+            <strong>Placa:</strong>
+            <span id="salida-placa"></span>
+          </div>
+          <div>
+            <strong>Tipo:</strong>
+            <span id="salida-tipo"></span>
+          </div>
+          <div>
+            <strong>Cliente:</strong>
+            <span id="salida-cliente"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Información de tiempo y costo -->
+      <div class="form-section">
+        <h4>Detalles del servicio</h4>
+        <div class="info-grid">
+          <div>
+            <strong>Entrada:</strong>
+            <span id="salida-hora-entrada"></span>
+          </div>
+          <div>
+            <strong>Salida:</strong>
+            <span id="salida-hora-salida"></span>
+          </div>
+          <div>
+            <strong>Tiempo de estancia:</strong>
+            <span id="salida-tiempo" class="time-highlight"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cálculo de costos -->
+      <div class="form-section">
+        <h4>Cálculo de pago</h4>
+        <div class="info-grid">
+          <div>
+            <strong>Tarifa aplicada:</strong>
+            <span id="salida-tarifa"></span>
+          </div>
+          <div id="salida-descuento-info" hidden>
+            <strong>Descuento:</strong>
+            <span id="salida-descuento"></span>
+          </div>
+          <div>
+            <strong>Valor antes de descuento:</strong>
+            <span id="salida-valor-antes"></span>
+          </div>
+          <div class="cost-highlight">
+            <strong>VALOR A COBRAR:</strong>
+            <span id="salida-valor" class="money-big"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Método de pago (REQUERIDO) -->
+      <div class="form-section">
+        <h4>Método de pago *</h4>
+        <div class="form-group">
+          <select id="pq-metodo-pago" required>
+            <option value="">-- Seleccione método de pago --</option>
+            <option value="EFECTIVO">💵 Efectivo</option>
+            <option value="TARJETA">💳 Tarjeta débito/crédito</option>
+            <option value="TRANSFERENCIA">📱 Transferencia bancaria</option>
+            <option value="OTRO">❓ Otro método</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="pq-referencia-group" hidden>
+          <label for="pq-referencia">Referencia de transacción</label>
+          <input type="text" id="pq-referencia" 
+            placeholder="Ej: referencia de transferencia o número de comprobante" />
+        </div>
+
+        <div class="form-group" id="pq-detalle-pago-group" hidden>
+          <label for="pq-detalle-pago">Detalle adicional</label>
+          <textarea id="pq-detalle-pago" rows="2"
+            placeholder="Ej: 20.000 efectivo + 10.000 transferencia, o notas sobre el pago"></textarea>
+        </div>
+      </div>
+
+      <!-- Observaciones finales -->
+      <div class="form-section">
+        <h4>Observaciones (opcional)</h4>
+        <div class="form-group">
+          <textarea id="pq-obs-salida" rows="2"
+            placeholder="Ej: rayón reparado, limpieza completada..."></textarea>
+        </div>
+      </div>
+
+      <!-- Botón para editar datos antes de confirmar -->
+      <div class="form-section">
+        <button class="btn btn-ghost btn-sm" onclick="toggleEditarRegistro()">
+          ✏️ Editar datos del registro
+        </button>
+      </div>
+
+      <!-- Sección de edición (oculta por defecto) -->
+      <div id="salida-editar" class="form-section" hidden>
+        <h4>Editar datos</h4>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="edit-placa">Placa</label>
+            <input type="text" id="edit-placa" placeholder="ABC123" />
+          </div>
+          <div class="form-group">
+            <label for="edit-cliente">Cliente</label>
+            <input type="text" id="edit-cliente" placeholder="Nombre del cliente" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="edit-tipo">Tipo de vehículo</label>
+          <select id="edit-tipo">
+            <option value="">-- Seleccione --</option>
+            <option value="CARRO">CARRO</option>
+            <option value="MOTO">MOTO</option>
+            <option value="BICICLETA">BICICLETA</option>
+            <option value="CUATRIMOTO">CUATRIMOTO</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="guardarEdicionRegistro()">
+          💾 Guardar cambios
+        </button>
+      </div>
     </div>
 
-    <div class="modal-actions">
+    <div class="modal-footer">
       <button class="btn btn-secondary" onclick="cerrarModalSalida()">Cancelar</button>
-      <button class="btn btn-primary" onclick="confirmarSalida()">Confirmar salida</button>
+      <button class="btn btn-primary btn-lg" onclick="confirmarSalida()">✓ Confirmar salida y pago</button>
     </div>
   </div>
 </div>

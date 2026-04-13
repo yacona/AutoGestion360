@@ -101,6 +101,11 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
     // Procesar archivo de evidencia si existe
     const evidencia_url = req.file ? `/uploads/parqueadero/${req.file.filename}` : null;
 
+    // Convertir es_conductor_propietario a boolean si viene como string desde FormData
+    if (typeof es_conductor_propietario === "string") {
+      es_conductor_propietario = es_conductor_propietario === "true";
+    }
+
     // Normalizar datos
     placa = normalizarPlaca(placa);
     tipo_vehiculo = limpiarTexto(tipo_vehiculo).toUpperCase();
@@ -615,12 +620,14 @@ router.get("/buscar/:placa", auth, async (req, res) => {
  *
  * Registra la salida de un vehículo del parqueadero por ID de registro,
  * calcula el tiempo total, minutos y valor basado en tarifa por hora.
+ * REQUIERE confirmación: metodo_pago debe ser especificado.
  *
  * Body (JSON) esperado:
  * {
- *   metodo_pago: "EFECTIVO" | "TARJETA" | "TRANSFERENCIA" | ...,
+ *   metodo_pago: "EFECTIVO" | "TARJETA" | "TRANSFERENCIA" | "OTRO" (REQUERIDO),
  *   detalle_pago: "Texto opcional sobre el pago...",
- *   observaciones: "Observaciones adicionales..."
+ *   observaciones: "Observaciones adicionales...",
+ *   referencia_transaccion: "Para TARJETA/TRANSFERENCIA (opcional)"
  * }
  */
 router.post("/salida/:id", auth, async (req, res) => {
@@ -628,21 +635,30 @@ router.post("/salida/:id", auth, async (req, res) => {
   const registro_id = req.params.id;
 
   try {
-    let { metodo_pago, detalle_pago, observaciones } = req.body || {};
+    let { metodo_pago, detalle_pago, observaciones, referencia_transaccion } = req.body || {};
 
     // Normalizar datos
     metodo_pago = limpiarTexto(metodo_pago);
     detalle_pago = limpiarTexto(detalle_pago);
     observaciones = limpiarTexto(observaciones);
+    referencia_transaccion = limpiarTexto(referencia_transaccion);
 
     // Validaciones básicas
     if (!registro_id || isNaN(registro_id)) {
       return res.status(400).json({ error: "ID de registro inválido." });
     }
 
-    // Si no se especifica método de pago, usar "EFECTIVO" por defecto
+    // Validar que metodo_pago es requerido y válido
+    const metodos_validos = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "OTRO"];
     if (!metodo_pago) {
-      metodo_pago = "EFECTIVO";
+      return res.status(400).json({ 
+        error: "Debe especificar el método de pago (EFECTIVO, TARJETA, TRANSFERENCIA u OTRO)." 
+      });
+    }
+    if (!metodos_validos.includes(metodo_pago)) {
+      return res.status(400).json({ 
+        error: `Método de pago inválido. Opciones válidas: ${metodos_validos.join(", ")}` 
+      });
     }
 
     // Abrimos transacción
@@ -779,6 +795,267 @@ router.get("/activo", auth, async (req, res) => {
   } catch (err) {
     console.error("Error obteniendo parqueadero activo:", err);
     res.status(500).json({ error: "Error interno del servidor." });
+  }
+});
+
+/**
+ * GET /api/parqueadero/:id
+ *
+ * Obtiene detalles completos de un registro específico para editar o visualizar antes de salida
+ */
+router.get("/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const registro_id = req.params.id;
+
+  try {
+    if (!registro_id || isNaN(registro_id)) {
+      return res.status(400).json({ error: "ID de registro inválido." });
+    }
+
+    const { rows } = await db.query(
+      `SELECT
+         p.id,
+         p.placa,
+         p.tipo_vehiculo,
+         p.nombre_cliente,
+         p.telefono,
+         p.documento_cliente,
+         p.nombre_conductor,
+         p.documento_conductor,
+         p.telefono_conductor,
+         p.hora_entrada,
+         p.hora_salida,
+         p.observaciones,
+         p.metodo_pago,
+         p.valor_total,
+         p.minutos_total,
+         v.id AS vehiculo_id,
+         v.marca,
+         v.modelo,
+         v.color
+       FROM parqueadero p
+       LEFT JOIN vehiculos v ON v.id = p.vehiculo_id
+       WHERE p.id = $1
+         AND p.empresa_id = $2`,
+      [registro_id, empresa_id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Registro no encontrado." });
+    }
+
+    res.json(rows[0]);
+  } catch (err) {
+    console.error("Error obteniendo registro:", err);
+    res.status(500).json({ error: "Error interno del servidor." });
+  }
+});
+
+/**
+ * PATCH /api/parqueadero/:id
+ *
+ * Edita datos de un registro ANTES de registrar salida
+ * Permite corregir: placa, tipo_vehiculo, nombre_cliente, telefono, documento, conductor, etc.
+ */
+router.patch("/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const registro_id = req.params.id;
+  
+  try {
+    if (!registro_id || isNaN(registro_id)) {
+      return res.status(400).json({ error: "ID de registro inválido." });
+    }
+
+    // Verificar que el registro existe y está activo (sin salida aún)
+    const { rows: activos } = await db.query(
+      `SELECT id FROM parqueadero
+       WHERE id = $1 AND empresa_id = $2 AND hora_salida IS NULL`,
+      [registro_id, empresa_id]
+    );
+
+    if (activos.length === 0) {
+      return res.status(404).json({ 
+        error: "Registro no encontrado o ya fue cerrado." 
+      });
+    }
+
+    // Campos permitidos para editar
+    const {
+      placa: placa_nueva,
+      tipo_vehiculo: tipo_vehiculo_nuevo,
+      nombre_cliente: nombre_cliente_nuevo,
+      telefono: telefono_nuevo,
+      documento_cliente: documento_nuevo,
+      nombre_conductor: conductor_nombre_nuevo,
+      documento_conductor: documento_conductor_nuevo,
+      telefono_conductor: telefono_conductor_nuevo,
+      observaciones: observaciones_nuevas,
+    } = req.body || {};
+
+    // Construir actualización dinámica
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (placa_nueva) {
+      updates.push(`placa = $${paramIndex++}`);
+      values.push(placa_nueva.toUpperCase().trim());
+    }
+    if (tipo_vehiculo_nuevo) {
+      updates.push(`tipo_vehiculo = $${paramIndex++}`);
+      values.push(tipo_vehiculo_nuevo);
+    }
+    if (nombre_cliente_nuevo) {
+      updates.push(`nombre_cliente = $${paramIndex++}`);
+      values.push(limpiarTexto(nombre_cliente_nuevo));
+    }
+    if (telefono_nuevo) {
+      updates.push(`telefono = $${paramIndex++}`);
+      values.push(limpiarTexto(telefono_nuevo));
+    }
+    if (documento_nuevo) {
+      updates.push(`documento_cliente = $${paramIndex++}`);
+      values.push(limpiarTexto(documento_nuevo));
+    }
+    if (conductor_nombre_nuevo) {
+      updates.push(`nombre_conductor = $${paramIndex++}`);
+      values.push(limpiarTexto(conductor_nombre_nuevo));
+    }
+    if (documento_conductor_nuevo) {
+      updates.push(`documento_conductor = $${paramIndex++}`);
+      values.push(limpiarTexto(documento_conductor_nuevo));
+    }
+    if (telefono_conductor_nuevo) {
+      updates.push(`telefono_conductor = $${paramIndex++}`);
+      values.push(limpiarTexto(telefono_conductor_nuevo));
+    }
+    if (observaciones_nuevas !== undefined) {
+      updates.push(`observaciones = $${paramIndex++}`);
+      values.push(limpiarTexto(observaciones_nuevas));
+    }
+
+    if (updates.length === 0) {
+      return res.json({ 
+        mensaje: "No hay cambios para aplicar.",
+        registro_id 
+      });
+    }
+
+    // Agregar ID al final para WHERE
+    values.push(registro_id);
+
+    const updateQuery = `
+      UPDATE parqueadero
+      SET ${updates.join(", ")}
+      WHERE id = $${paramIndex + 1}
+      RETURNING *
+    `;
+
+    const { rows: actualizado } = await db.query(updateQuery, values);
+
+    res.json({
+      mensaje: "Registro actualizado exitosamente.",
+      registro: actualizado[0],
+    });
+  } catch (err) {
+    console.error("Error actualizando registro:", err);
+    res.status(500).json({ error: "Error actualizando el registro." });
+  }
+});
+
+/**
+ * POST /api/parqueadero/:id/pre-salida
+ *
+ * Pre-calcula el costo de salida ANTES de confirmar pago
+ * Devuelve: tiempo total, minutos, monto a cobrar, tarifa aplicada
+ * NO registra la salida aún, solo calcula
+ */
+router.post("/:id/pre-salida", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const registro_id = req.params.id;
+
+  try {
+    if (!registro_id || isNaN(registro_id)) {
+      return res.status(400).json({ error: "ID de registro inválido." });
+    }
+
+    // Buscar registro activo
+    const { rows: activos } = await db.query(
+      `SELECT id, hora_entrada, tipo_vehiculo, placa, nombre_cliente, valor_total
+       FROM parqueadero
+       WHERE id = $1 AND empresa_id = $2 AND hora_salida IS NULL`,
+      [registro_id, empresa_id]
+    );
+
+    if (activos.length === 0) {
+      return res.status(404).json({
+        error: "Registro no encontrado o ya fue cerrado.",
+      });
+    }
+
+    const registro = activos[0];
+    const hora_entrada = new Date(registro.hora_entrada);
+    const hora_salida = new Date();
+
+    // Calcular tiempo
+    const diffMs = hora_salida - hora_entrada;
+    const minutos_total = Math.ceil(diffMs / (1000 * 60));
+    const horas_total = minutos_total / 60;
+
+    // Obtener tarifa
+    const { rows: tarifas } = await db.query(
+      `SELECT tarifa_por_hora, tarifa_minima, descuento_prolongada_horas, descuento_prolongada_porcentaje
+       FROM tarifas WHERE empresa_id = $1 AND tipo_vehiculo = $2 AND activo = TRUE`,
+      [empresa_id, registro.tipo_vehiculo]
+    );
+
+    let tarifa_por_hora = 1000;
+    let tarifa_minima = null;
+    let porcentaje_descuento = 0;
+    let descuento_aplicado = false;
+
+    if (tarifas.length > 0) {
+      const tarifa = tarifas[0];
+      tarifa_por_hora = parseFloat(tarifa.tarifa_por_hora);
+      tarifa_minima = tarifa.tarifa_minima ? parseFloat(tarifa.tarifa_minima) : null;
+      
+      if (tarifas[0].descuento_prolongada_horas && 
+          horas_total >= tarifas[0].descuento_prolongada_horas) {
+        porcentaje_descuento = parseFloat(tarifas[0].descuento_prolongada_porcentaje) || 0;
+        descuento_aplicado = true;
+      }
+    }
+
+    let valor_total = Math.ceil(horas_total * tarifa_por_hora);
+    if (tarifa_minima && valor_total < tarifa_minima) {
+      valor_total = Math.ceil(tarifa_minima);
+    }
+
+    const valor_antes_descuento = valor_total;
+    if (porcentaje_descuento > 0) {
+      valor_total = Math.ceil(valor_total * (1 - porcentaje_descuento / 100));
+    }
+
+    res.json({
+      registro_id,
+      placa: registro.placa,
+      cliente: registro.nombre_cliente,
+      tipo_vehiculo: registro.tipo_vehiculo,
+      hora_entrada: hora_entrada.toLocaleString("es-CO"),
+      hora_salida: hora_salida.toLocaleString("es-CO"),
+      tiempo_estancia: `${Math.floor(horas_total)}h ${minutos_total % 60}m`,
+      minutos_total,
+      horas_total: horas_total.toFixed(2),
+      tarifa_aplicada: `$${tarifa_por_hora} COP/hora`,
+      tarifa_minima: tarifa_minima ? `$${tarifa_minima} COP` : "No aplica",
+      descuento: descuento_aplicado ? `${porcentaje_descuento}%` : "No aplica",
+      valor_antes_descuento,
+      valor_a_cobrar: valor_total,
+      metodos_pago: ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "OTRO"],
+    });
+  } catch (err) {
+    console.error("Error en pre-salida:", err);
+    res.status(500).json({ error: "Error calculando salida." });
   }
 });
 
