@@ -150,6 +150,40 @@ async function loadDashboard() {
     document.getElementById("dash-taller-count").textContent =
       taller.filter(t => t.estado !== "Entregado").length;
   } catch {}
+
+  // Cargar ingresos del día
+  try {
+    console.log("Cargando ingresos del día...");
+    const resumenDia = await apiFetch("/api/reportes/parqueadero/resumen-dia");
+    console.log("Resumen del día recibido:", resumenDia);
+
+    const ingresosParqueadero = resumenDia.ingresos_totales || 0;
+
+    // Mostrar ingresos del parqueadero
+    document.getElementById("dash-ing-parqueadero").textContent =
+      `$${ingresosParqueadero.toLocaleString("es-CO")} COP`;
+
+    // Calcular total (por ahora solo parqueadero, lavadero y taller en 0)
+    const ingresosLavadero = 0; // TODO: implementar cuando esté disponible
+    const ingresosTaller = 0;   // TODO: implementar cuando esté disponible
+    const totalIngresos = ingresosParqueadero + ingresosLavadero + ingresosTaller;
+
+    document.getElementById("dash-ing-lavadero").textContent =
+      `$${ingresosLavadero.toLocaleString("es-CO")} COP`;
+    document.getElementById("dash-ing-taller").textContent =
+      `$${ingresosTaller.toLocaleString("es-CO")} COP`;
+    document.getElementById("dash-ing-total").textContent =
+      `$${totalIngresos.toLocaleString("es-CO")} COP`;
+
+    console.log("Ingresos actualizados:", { ingresosParqueadero, totalIngresos });
+  } catch (err) {
+    console.error("Error cargando ingresos:", err);
+    // Valores por defecto si falla la carga
+    document.getElementById("dash-ing-parqueadero").textContent = "$ 0";
+    document.getElementById("dash-ing-lavadero").textContent = "$ 0";
+    document.getElementById("dash-ing-taller").textContent = "$ 0";
+    document.getElementById("dash-ing-total").textContent = "$ 0";
+  }
 }
 /* ======================================================
 Procesar PLACA
