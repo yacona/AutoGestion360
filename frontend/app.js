@@ -10,6 +10,7 @@ const STORAGE = {
   TOKEN: "ag360_token",
   EMAIL: "ag360_user_email",
   EMPRESA: "ag360_empresa_nombre",
+  THEME: "ag360_theme",
 };
 
 /* ======================================================
@@ -50,6 +51,42 @@ async function apiFetch(path, options = {}) {
 }
 
 /* ======================================================
+   FUNCIONES DE UTILIDAD
+======================================================*/
+function showError(message, elementId = 'login-error') {
+  const element = document.getElementById(elementId);
+  if (element) {
+    element.textContent = message;
+    element.hidden = false;
+    setTimeout(() => element.hidden = true, 5000);
+  }
+}
+
+function showSuccess(message, elementId = 'empresa-success') {
+  const element = document.getElementById(elementId);
+  if (element) {
+    element.textContent = message;
+    element.hidden = false;
+    setTimeout(() => element.hidden = true, 5000);
+  }
+}
+
+function applyTheme(theme) {
+  const selectedTheme = theme === "light" ? "light" : "dark";
+  document.body.classList.toggle("theme-light", selectedTheme === "light");
+  document.body.classList.toggle("theme-dark", selectedTheme === "dark");
+  localStorage.setItem(STORAGE.THEME, selectedTheme);
+
+  document.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.themeOption === selectedTheme);
+  });
+}
+
+function initTheme() {
+  applyTheme(localStorage.getItem(STORAGE.THEME) || "dark");
+}
+
+/* ======================================================
    INICIO DE SESIÓN
 ======================================================*/
 async function handleLogin(event) {
@@ -76,9 +113,12 @@ async function handleLogin(event) {
     localStorage.setItem(STORAGE.TOKEN, data.token);
     localStorage.setItem(STORAGE.EMAIL, email);
     localStorage.setItem(STORAGE.EMPRESA, data.empresa?.nombre || "");
+    localStorage.setItem('empresa_logo', data.empresa?.logo_url || '');
+    localStorage.setItem('user_info', JSON.stringify(data.usuario));
 
     showMainView();
     initAfterLogin();
+    updateSidebarLogo(data.empresa?.logo_url, data.empresa?.nombre);
   } catch (err) {
     errorBox.textContent = err.message;
     errorBox.hidden = false;
@@ -117,6 +157,7 @@ function changeView(view) {
   if (view === "parqueadero") {
     cargarParqueaderoActivo();
     cargarHistorialParqueadero();
+    cargarMensualidadesParqueadero();
   }
   if (view === "dashboard") {
     loadDashboard();
@@ -138,11 +179,15 @@ function changeView(view) {
   if (view === "reportes") {
     setFechasDefecto();
   }
+  if (view === "config") {
+    loadConfig();
+  }
 }
 
 // Función para limpiar el formulario de parqueadero
 function limpiarFormularioParqueadero() {
   const placaEl = document.getElementById("pq-placa");
+  const servicioEl = document.getElementById("pq-servicio");
   const tipoEl = document.getElementById("pq-tipo");
   const nombreEl = document.getElementById("pq-nombre");
   const telEl = document.getElementById("pq-telefono");
@@ -154,6 +199,7 @@ function limpiarFormularioParqueadero() {
 
   // Limpiar todos los campos
   if (placaEl) placaEl.value = "";
+  if (servicioEl) servicioEl.value = "OCASIONAL_HORA";
   if (tipoEl) tipoEl.value = "CARRO"; // Resetear al valor por defecto
   if (nombreEl) nombreEl.value = "";
   if (telEl) telEl.value = "";
@@ -190,14 +236,103 @@ function formatDateParam(date) {
   return `${year}-${month}-${day}`;
 }
 
+function parseDateParam(value) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  if (!year || !month || !day) return new Date();
+  return new Date(year, month - 1, day);
+}
+
+function getDashboardDate() {
+  const input = document.getElementById("dash-fecha");
+  const todayParam = formatDateParam(new Date());
+
+  if (!input) return new Date();
+  if (!input.value) input.value = todayParam;
+
+  return parseDateParam(input.value);
+}
+
+function setElementText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function setSegmentWidth(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.style.width = `${Math.max(0, Math.min(100, value))}%`;
+}
+
+function renderRevenueSplit(resumenDia = {}) {
+  const parqueadero = Number(resumenDia.parqueadero?.total || 0);
+  const lavadero = Number(resumenDia.lavadero?.total || 0);
+  const taller = Number(resumenDia.taller?.total || 0);
+  const total = parqueadero + lavadero + taller;
+
+  setElementText("dash-ing-parqueadero", formatMoney(parqueadero));
+  setElementText("dash-ing-lavadero", formatMoney(lavadero));
+  setElementText("dash-ing-taller", formatMoney(taller));
+  setElementText("dash-ing-total", formatMoney(total));
+  setElementText("dash-revenue-total-label", formatMoney(total));
+  setElementText("dash-lavados-count", Number(resumenDia.lavadero?.cantidad || 0));
+  setElementText("dash-taller-count", Number(resumenDia.taller?.cantidad || 0));
+  setElementText("dash-services-total", `${Number(resumenDia.cantidad_total || 0)} servicios cerrados`);
+
+  if (total <= 0) {
+    setSegmentWidth("dash-revenue-parqueadero-bar", 33.33);
+    setSegmentWidth("dash-revenue-lavadero-bar", 33.33);
+    setSegmentWidth("dash-revenue-taller-bar", 33.34);
+    return;
+  }
+
+  setSegmentWidth("dash-revenue-parqueadero-bar", (parqueadero / total) * 100);
+  setSegmentWidth("dash-revenue-lavadero-bar", (lavadero / total) * 100);
+  setSegmentWidth("dash-revenue-taller-bar", (taller / total) * 100);
+}
+
+function renderOccupancy(ocupancia = {}, activos = []) {
+  const capacidad = Number(ocupancia.capacidad_total || 0);
+  const ocupados = Number(ocupancia.espacios_ocupados ?? activos.length ?? 0);
+  const porcentaje = capacidad > 0 ? Math.min(100, Math.round((ocupados / capacidad) * 100)) : 0;
+  const ring = document.getElementById("dash-occupancy-ring");
+
+  if (ring) {
+    const circumference = 2 * Math.PI * 46;
+    ring.style.strokeDasharray = `${(porcentaje / 100) * circumference} ${circumference}`;
+  }
+
+  setElementText("dash-occupancy-percent", `${porcentaje}%`);
+  setElementText("dash-occupancy-detail", `${ocupados} de ${capacidad || 0} espacios`);
+  setElementText("dash-parqueadero-note", capacidad ? `${Math.max(0, capacidad - ocupados)} espacios disponibles` : "Activos ahora");
+
+  const byType = activos.reduce((acc, item) => {
+    const key = item.tipo_vehiculo || "OTRO";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const container = document.getElementById("dash-active-types");
+  if (!container) return;
+
+  const entries = Object.entries(byType);
+  container.innerHTML = entries.length
+    ? entries.map(([tipo, total]) => `<span>${tipo}: <strong>${total}</strong></span>`).join("")
+    : "<span>Sin vehículos activos</span>";
+}
+
 function renderDashboardChart(dias) {
   const chart = document.getElementById("dash-chart");
   const empty = document.getElementById("dash-chart-empty");
-  if (!chart || !empty) return;
+  const line = document.getElementById("dash-trend-line");
+  const area = document.getElementById("dash-trend-area");
+  const pointsGroup = document.getElementById("dash-trend-points");
+  if (!chart || !empty || !line || !area || !pointsGroup) return;
 
   const maxTotal = Math.max(...dias.map(dia => Number(dia.total_general || 0)), 0);
 
   chart.innerHTML = "";
+  line.setAttribute("points", "");
+  area.setAttribute("d", "");
+  pointsGroup.innerHTML = "";
 
   if (!dias.length || maxTotal <= 0) {
     empty.hidden = false;
@@ -205,6 +340,28 @@ function renderDashboardChart(dias) {
   }
 
   empty.hidden = true;
+
+  const width = 640;
+  const height = 220;
+  const paddingX = 24;
+  const paddingY = 24;
+  const usableWidth = width - paddingX * 2;
+  const usableHeight = height - paddingY * 2;
+  const points = dias.map((dia, index) => {
+    const x = dias.length === 1 ? width / 2 : paddingX + (index / (dias.length - 1)) * usableWidth;
+    const y = height - paddingY - (Number(dia.total_general || 0) / maxTotal) * usableHeight;
+    return { x, y, dia, total: Number(dia.total_general || 0) };
+  });
+
+  line.setAttribute("points", points.map(point => `${point.x},${point.y}`).join(" "));
+  area.setAttribute(
+    "d",
+    `M ${points[0].x} ${height - paddingY} L ${points.map(point => `${point.x} ${point.y}`).join(" L ")} L ${points[points.length - 1].x} ${height - paddingY} Z`
+  );
+
+  pointsGroup.innerHTML = points.map(point => `
+    <circle class="trend-point" cx="${point.x}" cy="${point.y}" r="4"></circle>
+  `).join("");
 
   chart.innerHTML = dias
     .map(dia => {
@@ -214,13 +371,17 @@ function renderDashboardChart(dias) {
         <div class="chart-row">
           <span class="chart-date">${dia.fecha}</span>
           <div class="chart-bar-wrapper">
-            <div class="chart-bar" style="width: ${width}%"></div>
+            <div class="chart-bar" data-width="${width}"></div>
           </div>
           <span class="chart-value">${formatMoney(total)}</span>
         </div>
       `;
     })
     .join("");
+
+  chart.querySelectorAll(".chart-bar").forEach((bar) => {
+    bar.style.width = `${bar.dataset.width}%`;
+  });
 }
 
 let cobroServicioActual = null;
@@ -386,54 +547,50 @@ async function confirmarCobroServicio() {
 }
 
 async function loadDashboard() {
+  const selectedDate = getDashboardDate();
+  const selectedParam = formatDateParam(selectedDate);
+  const todayParam = formatDateParam(new Date());
+
+  setElementText("dash-date-eyebrow", selectedParam === todayParam ? "Hoy" : "Consulta");
+  setElementText("dash-current-date", selectedDate.toLocaleDateString("es-CO", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }));
+
+  let activosDashboard = [];
+
   try {
     const activos = await apiFetch("/api/parqueadero/activo");
-    document.getElementById("dash-parqueadero-count").textContent = activos.length;
+    activosDashboard = Array.isArray(activos) ? activos : [];
+    document.getElementById("dash-parqueadero-count").textContent = activosDashboard.length;
   } catch (err) {
     console.error("Error cargando parqueadero dashboard:", err);
   }
 
   try {
-    const lavados = await apiFetch("/api/lavadero");
-    const lavadosActivos = lavados.filter(lavado => lavado.estado !== "Completado");
-    document.getElementById("dash-lavados-count").textContent = lavadosActivos.length;
+    const ocupancia = await apiFetch("/api/reportes/parqueadero/ocupancia");
+    renderOccupancy(ocupancia, activosDashboard);
   } catch (err) {
-    console.error("Error cargando lavadero dashboard:", err);
+    console.error("Error cargando ocupación:", err);
+    renderOccupancy({}, activosDashboard);
   }
 
   try {
-    const taller = await apiFetch("/api/taller");
-    document.getElementById("dash-taller-count").textContent =
-      taller.filter(t => t.estado !== "Entregado").length;
-  } catch (err) {
-    console.error("Error cargando taller dashboard:", err);
-  }
+    const resumenDia = await apiFetch(`/api/reportes/resumen?desde=${selectedParam}&hasta=${selectedParam}`);
 
-  try {
-    const hoy = new Date();
-    const hoyParam = formatDateParam(hoy);
-    const resumenDia = await apiFetch(`/api/reportes/resumen?desde=${hoyParam}&hasta=${hoyParam}`);
-
-    document.getElementById("dash-ing-parqueadero").textContent =
-      formatMoney(resumenDia.parqueadero?.total || 0);
-    document.getElementById("dash-ing-lavadero").textContent =
-      formatMoney(resumenDia.lavadero?.total || 0);
-    document.getElementById("dash-ing-taller").textContent =
-      formatMoney(resumenDia.taller?.total || 0);
-    document.getElementById("dash-ing-total").textContent =
-      formatMoney(resumenDia.total_general || 0);
+    renderRevenueSplit(resumenDia);
   } catch (err) {
     console.error("Error cargando ingresos:", err);
-    document.getElementById("dash-ing-parqueadero").textContent = "$ 0";
-    document.getElementById("dash-ing-lavadero").textContent = "$ 0";
-    document.getElementById("dash-ing-taller").textContent = "$ 0";
-    document.getElementById("dash-ing-total").textContent = "$ 0";
+    renderRevenueSplit({});
   }
 
   try {
-    const hasta = new Date();
+    const hasta = new Date(selectedDate);
     const desde = new Date(hasta);
     desde.setDate(hasta.getDate() - 6);
+    setElementText("dash-trend-range", `${formatDateParam(desde)} a ${formatDateParam(hasta)}`);
 
     const diario = await apiFetch(
       `/api/reportes/diario?desde=${formatDateParam(desde)}&hasta=${formatDateParam(hasta)}`
@@ -464,6 +621,7 @@ function procesarPlacaParqueadero(data) {
   const existe = data.existe;
   const vehiculo = data.vehiculo;
   const propietario = data.propietario;
+  const mensualidad = data.mensualidad;
   const historial = data.historial;
   const msgEl = document.getElementById("pq-msg");
   const histEl = document.getElementById("pq-historial");
@@ -478,6 +636,7 @@ function procesarPlacaParqueadero(data) {
   }
 
   const tipoEl = document.getElementById("pq-tipo");
+  const servicioEl = document.getElementById("pq-servicio");
   const nombreEl = document.getElementById("pq-nombre");
   const telEl = document.getElementById("pq-telefono");
 
@@ -487,6 +646,7 @@ function procesarPlacaParqueadero(data) {
 
   if (existe) {
     if (tipoEl) tipoEl.value = vehiculo.tipo_vehiculo || "";
+    if (servicioEl && mensualidad) servicioEl.value = "MENSUALIDAD";
 
     if (propietario) {
       if (nombreEl) nombreEl.value = propietario.nombre || "";
@@ -499,10 +659,16 @@ function procesarPlacaParqueadero(data) {
 
     if (msgEl) {
       msgEl.hidden = false;
-      msgEl.textContent = "Vehículo existente. El sistema cargó datos previos y el historial.";
+      if (mensualidad) {
+        seleccionarFlujoParqueadero("mensualidad");
+      }
+      msgEl.textContent = mensualidad
+        ? "Mensualidad activa encontrada. El ingreso quedará asociado a ese cliente."
+        : "Vehículo existente. El sistema cargó datos previos y el historial.";
       msgEl.classList.remove("error");
       msgEl.classList.add("ok");
     }
+    actualizarAyudaTipoServicioParqueadero();
   } else {
     if (msgEl) {
       msgEl.hidden = false;
@@ -535,6 +701,57 @@ function mostrarHistorialVehiculo(element, historial) {
 }
 
 
+function seleccionarFlujoParqueadero(flujo = "ocasional") {
+  const ingresoPanel = document.getElementById("pq-panel-ingreso");
+  const altaPanel = document.getElementById("pq-panel-alta-mensualidad");
+  const servicioEl = document.getElementById("pq-servicio");
+  const titleEl = document.getElementById("pq-ingreso-title");
+  const helpEl = document.getElementById("pq-ingreso-help");
+  const nombreHelpEl = document.getElementById("pq-nombre-help");
+  const submitBtn = document.querySelector("#form-parqueadero-entrada button[type='submit']");
+
+  document.querySelectorAll(".module-action-btn").forEach((btn) => {
+    btn.classList.remove("active");
+  });
+
+  if (flujo === "alta") {
+    ingresoPanel?.classList.add("hidden");
+    altaPanel?.classList.remove("hidden");
+    document.getElementById("btn-pq-alta-mensualidad")?.classList.add("active");
+    setMensualidadFechasDefecto();
+    cargarMensualidadesParqueadero();
+    return;
+  }
+
+  ingresoPanel?.classList.remove("hidden");
+  altaPanel?.classList.add("hidden");
+
+  if (flujo === "mensualidad") {
+    if (servicioEl) servicioEl.value = "MENSUALIDAD";
+    if (titleEl) titleEl.textContent = "Registrar ingreso de mensualidad";
+    if (helpEl) helpEl.textContent = "Ingresa la placa de un cliente con mensualidad activa. El sistema cargará sus datos y la salida quedará cobrada contra la mensualidad.";
+    if (nombreHelpEl) nombreHelpEl.textContent = "Se carga desde la mensualidad activa asociada a la placa.";
+    if (submitBtn) submitBtn.textContent = "Registrar ingreso mensualidad";
+    document.getElementById("btn-pq-ingreso-mensualidad")?.classList.add("active");
+  } else if (flujo === "dia") {
+    if (servicioEl) servicioEl.value = "OCASIONAL_DIA";
+    if (titleEl) titleEl.textContent = "Registrar ingreso por día";
+    if (helpEl) helpEl.textContent = "Registra vehículos ocasionales con cobro mínimo de día completo según la configuración de tarifas.";
+    if (nombreHelpEl) nombreHelpEl.textContent = "Puede quedar vacío; se registrará como usuario genérico.";
+    if (submitBtn) submitBtn.textContent = "Registrar ingreso por día";
+    document.getElementById("btn-pq-ingreso-dia")?.classList.add("active");
+  } else {
+    if (servicioEl) servicioEl.value = "OCASIONAL_HORA";
+    if (titleEl) titleEl.textContent = "Registrar ingreso por horas";
+    if (helpEl) helpEl.textContent = "Registra vehículos ocasionales por fracciones u horas. El nombre puede quedar vacío y se guardará como usuario genérico.";
+    if (nombreHelpEl) nombreHelpEl.textContent = "Para usuarios ocasionales puede quedar vacío; se registrará como usuario genérico.";
+    if (submitBtn) submitBtn.textContent = "Registrar ingreso por horas";
+    document.getElementById("btn-pq-ingreso-ocasional")?.classList.add("active");
+  }
+
+  actualizarAyudaTipoServicioParqueadero();
+}
+
 /* ======================================================
    PARQUEADERO — REGISTRO DE ENTRADA
 ======================================================*/
@@ -542,6 +759,7 @@ async function handleEntradaParqueadero(event) {
   event.preventDefault();
 
   const placaEl = document.getElementById("pq-placa");
+  const servicioEl = document.getElementById("pq-servicio");
   const tipoEl = document.getElementById("pq-tipo");
   const nombreEl = document.getElementById("pq-nombre");
   const telEl = document.getElementById("pq-telefono");
@@ -553,6 +771,7 @@ async function handleEntradaParqueadero(event) {
   msgEl.textContent = "";
 
   const placa = placaEl.value.trim().toUpperCase().replace(/\s+/g, "");
+  const tipo_servicio = servicioEl?.value || "OCASIONAL_HORA";
   const tipo_vehiculo = tipoEl.value.trim().toUpperCase();
   const nombre_cliente = nombreEl.value.trim().toUpperCase();
   const telefono = telEl.value.trim();
@@ -567,14 +786,6 @@ async function handleEntradaParqueadero(event) {
     return;
   }
 
-  if (!nombre_cliente) {
-    msgEl.textContent = "Debe indicar el nombre del propietario/conductor.";
-    msgEl.hidden = false;
-    msgEl.classList.remove("ok");
-    msgEl.classList.add("error");
-    return;
-  }
-
   const evidenciaEl = document.getElementById("pq-evidencia");
   const evidenciaFile = evidenciaEl?.files?.[0] || null;
 
@@ -582,6 +793,7 @@ async function handleEntradaParqueadero(event) {
     const formData = new FormData();
     formData.append("placa", placa);
     formData.append("tipo_vehiculo", tipo_vehiculo);
+    formData.append("tipo_servicio", tipo_servicio);
     formData.append("es_conductor_propietario", String(es_propietario));
     formData.append("observaciones", observaciones || "");
     formData.append("propietario_nombre", nombre_cliente);
@@ -610,6 +822,7 @@ async function handleEntradaParqueadero(event) {
 
     // Limpiar todos los campos del formulario para el siguiente vehículo
     placaEl.value = "";
+    if (servicioEl) servicioEl.value = tipo_servicio === "MENSUALIDAD" ? "MENSUALIDAD" : "OCASIONAL_HORA";
     tipoEl.value = "CARRO"; // Resetear al valor por defecto
     nombreEl.value = "";
     telEl.value = "";
@@ -619,8 +832,7 @@ async function handleEntradaParqueadero(event) {
 
     // Recargar la tabla de vehículos activos para mostrar el nuevo registro
     await cargarParqueaderoActivo();
-
-    await cargarParqueaderoActivo();   // ✅ ahora sí existe
+    await cargarMensualidadesParqueadero();
   } catch (err) {
     console.error("Error en handleEntradaParqueadero:", err);
     msgEl.textContent = err.message || "Error registrando entrada.";
@@ -629,6 +841,118 @@ async function handleEntradaParqueadero(event) {
     msgEl.classList.add("error");
   }
   
+}
+
+function actualizarAyudaTipoServicioParqueadero() {
+  const servicio = document.getElementById("pq-servicio")?.value || "OCASIONAL_HORA";
+  const nombreEl = document.getElementById("pq-nombre");
+  const propEl = document.getElementById("pq-es-propietario");
+
+  if (nombreEl) {
+    nombreEl.placeholder = servicio === "MENSUALIDAD"
+      ? "Se carga desde la mensualidad"
+      : "Opcional";
+  }
+
+  if (propEl && servicio !== "MENSUALIDAD") {
+    propEl.checked = true;
+  }
+}
+
+function servicioParqueaderoLabel(servicio) {
+  const labels = {
+    OCASIONAL_HORA: "Horas",
+    OCASIONAL_DIA: "Día",
+    MENSUALIDAD: "Mensualidad",
+  };
+  return labels[servicio] || "Horas";
+}
+
+function setMensualidadFechasDefecto() {
+  const inicioEl = document.getElementById("pq-men-inicio");
+  const finEl = document.getElementById("pq-men-fin");
+  if (!inicioEl || !finEl || inicioEl.value || finEl.value) return;
+
+  const hoy = new Date();
+  const fin = new Date(hoy);
+  fin.setMonth(fin.getMonth() + 1);
+  inicioEl.value = formatDateParam(hoy);
+  finEl.value = formatDateParam(fin);
+}
+
+async function handleNuevaMensualidadParqueadero(event) {
+  event.preventDefault();
+
+  const payload = {
+    nombre_cliente: document.getElementById("pq-men-nombre").value.trim(),
+    documento: document.getElementById("pq-men-documento").value.trim(),
+    telefono: document.getElementById("pq-men-telefono").value.trim(),
+    correo: document.getElementById("pq-men-correo").value.trim(),
+    direccion: document.getElementById("pq-men-direccion").value.trim(),
+    contacto_emergencia: document.getElementById("pq-men-emergencia").value.trim(),
+    placa: document.getElementById("pq-men-placa").value.trim().toUpperCase().replace(/\s+/g, ""),
+    tipo_vehiculo: document.getElementById("pq-men-tipo").value,
+    marca: document.getElementById("pq-men-marca").value.trim(),
+    modelo: document.getElementById("pq-men-modelo").value.trim(),
+    color: document.getElementById("pq-men-color").value.trim(),
+    fecha_inicio: document.getElementById("pq-men-inicio").value,
+    fecha_fin: document.getElementById("pq-men-fin").value,
+    valor_mensual: Number(document.getElementById("pq-men-valor").value || 0),
+    observaciones: document.getElementById("pq-men-obs").value.trim(),
+  };
+
+  if (!payload.nombre_cliente || !payload.documento || !payload.placa || !payload.fecha_inicio || !payload.fecha_fin) {
+    showMessage("pq-men-msg", "Complete nombre, documento, placa e intervalo de la mensualidad.", true);
+    return;
+  }
+
+  try {
+    await apiFetch("/api/parqueadero/mensualidades", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    showMessage("pq-men-msg", "Mensualidad registrada correctamente.");
+    event.target.reset();
+    setMensualidadFechasDefecto();
+    await cargarMensualidadesParqueadero();
+  } catch (err) {
+    showMessage("pq-men-msg", err.message, true);
+  }
+}
+
+async function cargarMensualidadesParqueadero() {
+  const tbody = document.getElementById("pq-mensualidades-tbody");
+  const empty = document.getElementById("pq-mensualidades-empty");
+  if (!tbody || !empty) return;
+
+  setMensualidadFechasDefecto();
+
+  try {
+    const data = await apiFetch("/api/parqueadero/mensualidades?incluir_inactivas=true");
+    tbody.innerHTML = "";
+
+    if (!Array.isArray(data) || data.length === 0) {
+      empty.hidden = false;
+      return;
+    }
+
+    empty.hidden = true;
+    tbody.innerHTML = data.map((item) => `
+      <tr>
+        <td>${item.nombre_cliente || "-"}</td>
+        <td>${item.placa}</td>
+        <td>${item.tipo_vehiculo}</td>
+        <td>${new Date(item.fecha_inicio).toLocaleDateString()} - ${new Date(item.fecha_fin).toLocaleDateString()}</td>
+        <td>${formatMoney(item.valor_mensual || 0)}</td>
+        <td>${item.ingresos_registrados || 0}</td>
+        <td><span class="badge">${item.estado}</span></td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    console.error("Error cargando mensualidades:", err);
+    empty.hidden = false;
+    empty.textContent = "Error cargando mensualidades.";
+  }
 }
 
 /* ======================================================
@@ -660,6 +984,7 @@ async function cargarParqueaderoActivo() {
       tr.innerHTML = `
         <td>${item.placa}</td>
         <td>${item.tipo_vehiculo}</td>
+        <td>${servicioParqueaderoLabel(item.tipo_servicio)}</td>
         <td>${item.nombre_cliente || "-"}</td>
         <td>${new Date(item.hora_entrada).toLocaleString()}</td>
         <td>-</td>
@@ -731,7 +1056,10 @@ async function handleSalidaClick(event) {
       `$${preCalculo.valor_a_cobrar.toLocaleString("es-CO")} COP`;
 
     // 3) Limpiar campos de pago
-    document.getElementById("pq-metodo-pago").value = "";
+    document.getElementById("pq-metodo-pago").value =
+      preCalculo.tipo_servicio === "MENSUALIDAD" || Number(preCalculo.valor_a_cobrar || 0) === 0
+        ? "MENSUALIDAD"
+        : "";
     document.getElementById("pq-referencia").value = "";
     document.getElementById("pq-detalle-pago").value = "";
     document.getElementById("pq-obs-salida").value = "";
@@ -845,6 +1173,7 @@ async function confirmarSalida() {
     // Recargar tabla de activos
     await cargarParqueaderoActivo();
     await cargarHistorialParqueadero();
+    await cargarMensualidadesParqueadero();
     await loadDashboard();
   } catch (err) {
     console.error("Error registrando salida:", err);
@@ -893,6 +1222,8 @@ document.addEventListener("input", (e) => {
    INICIALIZACIÓN GLOBAL
 ======================================================*/
 document.addEventListener("DOMContentLoaded", () => {
+  initTheme();
+
   // Login
   const loginForm = document.getElementById("login-form");
   loginForm?.addEventListener("submit", handleLogin);
@@ -909,6 +1240,26 @@ document.addEventListener("DOMContentLoaded", () => {
   document
     .getElementById("form-parqueadero-entrada")
     ?.addEventListener("submit", handleEntradaParqueadero);
+
+  document
+    .getElementById("form-parqueadero-mensualidad")
+    ?.addEventListener("submit", handleNuevaMensualidadParqueadero);
+
+  document
+    .getElementById("btn-pq-ingreso-ocasional")
+    ?.addEventListener("click", () => seleccionarFlujoParqueadero("ocasional"));
+
+  document
+    .getElementById("btn-pq-ingreso-dia")
+    ?.addEventListener("click", () => seleccionarFlujoParqueadero("dia"));
+
+  document
+    .getElementById("btn-pq-ingreso-mensualidad")
+    ?.addEventListener("click", () => seleccionarFlujoParqueadero("mensualidad"));
+
+  document
+    .getElementById("btn-pq-alta-mensualidad")
+    ?.addEventListener("click", () => seleccionarFlujoParqueadero("alta"));
 
   // Click en botones de salida
   document
@@ -967,6 +1318,55 @@ document.addEventListener("DOMContentLoaded", () => {
     .getElementById("form-rep-filtro")
     ?.addEventListener("submit", handleGenerarReportes);
 
+  // Configuración
+  document
+    .getElementById("form-empresa")
+    ?.addEventListener("submit", handleActualizarEmpresa);
+
+  document
+    .getElementById("btn-ver-licencias")
+    ?.addEventListener("click", handleVerLicencias);
+
+  document
+    .getElementById("btn-asignar-licencia")
+    ?.addEventListener("click", handleAsignarLicencia);
+
+  document
+    .getElementById("btn-notificar-vencimientos")
+    ?.addEventListener("click", handleNotificarVencimientos);
+
+  document
+    .getElementById("empresa-logo-file")
+    ?.addEventListener("change", handleLogoFileChange);
+
+  document
+    .getElementById("form-parqueadero-config")
+    ?.addEventListener("submit", handleGuardarParqueaderoConfig);
+
+  document
+    .getElementById("btn-toggle-parqueadero-config")
+    ?.addEventListener("click", toggleParqueaderoConfig);
+
+  document.querySelectorAll(".config-tab").forEach((button) => {
+    button.addEventListener("click", () => setConfigTab(button.dataset.configTab));
+  });
+
+  document.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme(button.dataset.themeOption));
+  });
+
+  document
+    .getElementById("dash-fecha")
+    ?.addEventListener("change", loadDashboard);
+
+  document
+    .getElementById("btn-dash-hoy")
+    ?.addEventListener("click", () => {
+      const input = document.getElementById("dash-fecha");
+      if (input) input.value = formatDateParam(new Date());
+      loadDashboard();
+    });
+
   const token = localStorage.getItem(STORAGE.TOKEN);
   if (token) {
     showMainView();
@@ -983,7 +1383,454 @@ function initAfterLogin() {
   const email = localStorage.getItem(STORAGE.EMAIL);
   if (email) document.getElementById("user-info-label").textContent = email;
 
+  const empresaLogo = localStorage.getItem('empresa_logo');
+  updateSidebarLogo(empresaLogo, empresa);
+
   changeView("dashboard");
+}
+
+/* ======================================================
+   MÓDULO CONFIGURACIÓN
+======================================================*/
+function userIsAdmin() {
+  const userInfo = JSON.parse(localStorage.getItem('user_info') || '{}');
+  const rol = String(userInfo.rol || "").toLowerCase();
+  return rol === "admin" || rol === "administrador";
+}
+
+function setConfigTab(tab = "empresa") {
+  const selectedTab = tab || "empresa";
+
+  document.querySelectorAll(".config-tab").forEach((button) => {
+    const active = button.dataset.configTab === selectedTab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+
+  document.querySelectorAll("[data-config-panel]").forEach((panel) => {
+    const samePanel = panel.dataset.configPanel === selectedTab;
+    const adminOnly = panel.dataset.adminOnly === "true";
+    panel.classList.toggle("hidden", !samePanel || (adminOnly && !userIsAdmin()));
+  });
+
+  if (selectedTab === "parqueadero") {
+    loadParqueaderoConfig();
+  }
+}
+
+async function loadConfig() {
+  try {
+    // Cargar información de la empresa
+    const empresa = await apiFetch('/api/empresa');
+    document.getElementById('empresa-nombre').value = empresa.nombre || '';
+    document.getElementById('empresa-nit').value = empresa.nit || '';
+    document.getElementById('empresa-ciudad').value = empresa.ciudad || '';
+    document.getElementById('empresa-direccion').value = empresa.direccion || '';
+    document.getElementById('empresa-telefono').value = empresa.telefono || '';
+    document.getElementById('empresa-email').value = empresa.email_contacto || '';
+    document.getElementById('empresa-zona-horaria').value = empresa.zona_horaria || 'America/Bogota';
+    document.getElementById('empresa-logo-file').value = '';
+    updateLogoPreview(empresa.logo_url, empresa.nombre);
+
+    // Cargar información de la licencia
+    await loadLicenciaInfo();
+    await loadParqueaderoConfig();
+
+    const activeTab = document.querySelector(".config-tab.active")?.dataset.configTab || "empresa";
+    setConfigTab(activeTab);
+
+  } catch (error) {
+    console.error('Error cargando configuración:', error);
+    showError('Error al cargar la configuración');
+  }
+}
+
+async function loadLicenciaInfo() {
+  try {
+    const licencia = await apiFetch('/api/empresa/licencia');
+
+    if (licencia.mensaje) {
+      // No hay licencia
+      document.getElementById('licencia-nombre').textContent = 'Sin licencia';
+      document.getElementById('licencia-inicio').textContent = '-';
+      document.getElementById('licencia-fin').textContent = '-';
+      document.getElementById('licencia-estado').textContent = 'Inactiva';
+      document.getElementById('modulos-lista').innerHTML = '<li>Ninguno</li>';
+      document.getElementById('btn-renovar-licencia')?.classList.add('hidden');
+      return;
+    }
+
+    document.getElementById('licencia-nombre').textContent = licencia.licencia_nombre;
+    document.getElementById('licencia-inicio').textContent = new Date(licencia.fecha_inicio).toLocaleDateString('es-ES');
+    document.getElementById('licencia-fin').textContent = licencia.fecha_fin ? new Date(licencia.fecha_fin).toLocaleDateString('es-ES') : 'Sin vencimiento';
+    document.getElementById('licencia-estado').textContent = licencia.activa ? 'Activa' : 'Inactiva';
+
+    const modulosLista = document.getElementById('modulos-lista');
+    modulosLista.innerHTML = '';
+    if (licencia.modulos && licencia.modulos.length > 0) {
+      licencia.modulos.forEach(modulo => {
+        const li = document.createElement('li');
+        li.textContent = modulo.nombre;
+        modulosLista.appendChild(li);
+      });
+    } else {
+      modulosLista.innerHTML = '<li>Ninguno</li>';
+    }
+
+    // Mostrar botón de renovar si está próxima a vencer (30 días)
+    const hoy = new Date();
+    const fechaFin = new Date(licencia.fecha_fin);
+    const diasRestantes = Math.ceil((fechaFin - hoy) / (1000 * 60 * 60 * 24));
+    document.getElementById('btn-renovar-licencia')?.classList.toggle('hidden', diasRestantes > 30);
+
+  } catch (error) {
+    console.error('Error cargando licencia:', error);
+  }
+}
+
+function setInputValue(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.value = value ?? "";
+}
+
+function getNumberValue(id) {
+  const value = Number(document.getElementById(id)?.value || 0);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function setVehicleConfig(prefix, data = {}) {
+  setInputValue(`cfg-${prefix}-bahias`, data.bahias);
+  setInputValue(`cfg-${prefix}-valor-dia`, data.valor_dia);
+  setInputValue(`cfg-${prefix}-fraccion-dia`, data.fraccion_dia_minutos);
+  setInputValue(`cfg-${prefix}-valor-primera`, data.valor_primera_fraccion);
+  setInputValue(`cfg-${prefix}-tiempo-primera`, data.tiempo_primera_fraccion);
+  setInputValue(`cfg-${prefix}-valor-segunda`, data.valor_segunda_fraccion);
+  setInputValue(`cfg-${prefix}-tiempo-segunda`, data.tiempo_segunda_fraccion);
+}
+
+function getVehicleConfig(prefix) {
+  return {
+    bahias: getNumberValue(`cfg-${prefix}-bahias`),
+    valor_dia: getNumberValue(`cfg-${prefix}-valor-dia`),
+    fraccion_dia_minutos: getNumberValue(`cfg-${prefix}-fraccion-dia`),
+    valor_primera_fraccion: getNumberValue(`cfg-${prefix}-valor-primera`),
+    tiempo_primera_fraccion: getNumberValue(`cfg-${prefix}-tiempo-primera`),
+    valor_segunda_fraccion: getNumberValue(`cfg-${prefix}-valor-segunda`),
+    tiempo_segunda_fraccion: getNumberValue(`cfg-${prefix}-tiempo-segunda`),
+  };
+}
+
+function parseHoraCompletaInput(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return null;
+
+  const match = raw.match(/^(\d{1,2})(?::([0-5]\d))?\s*(AM|PM)?$/);
+  if (!match) return null;
+
+  let hour = Number(match[1]);
+  const minutes = match[2] || "00";
+  const suffix = match[3];
+
+  if (minutes !== "00") return null;
+
+  if (suffix) {
+    if (hour < 1 || hour > 12) return null;
+    if (suffix === "AM") hour = hour === 12 ? 0 : hour;
+    if (suffix === "PM") hour = hour === 12 ? 12 : hour + 12;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+
+  return hour;
+}
+
+function formatHoraCompleta(value) {
+  const hour = parseHoraCompletaInput(value);
+  if (hour === null) return "";
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function renderParqueaderoReglas(reglas = []) {
+  const tbody = document.getElementById("cfg-reglas-tbody");
+  if (!tbody) return;
+
+  tbody.innerHTML = reglas.map((regla) => `
+    <tr data-dia="${regla.dia_codigo}">
+      <td>
+        <select data-field="aplica">
+          <option value="false"${regla.aplica ? "" : " selected"}>NO</option>
+          <option value="true"${regla.aplica ? " selected" : ""}>SI</option>
+        </select>
+      </td>
+      <td>
+        <input type="text" data-field="dia_nombre" value="${regla.dia_codigo}" readonly />
+      </td>
+      <td>
+        <input type="text" data-field="hora_inicio_gratis" value="${formatHoraCompleta(regla.hora_inicio_gratis)}" placeholder="07:00 / 7 AM" title="Use horas completas: 7, 07:00, 7 AM, 7:00 AM o 19:00" />
+      </td>
+      <td>
+        <input type="text" data-field="hora_fin_gratis" value="${formatHoraCompleta(regla.hora_fin_gratis)}" placeholder="11:00 / 11 AM" title="Use horas completas: 11, 11:00, 11 AM, 7 PM o 19:00" />
+      </td>
+      <td>
+        <input type="number" data-field="minutos_gracia" min="0" value="${regla.minutos_gracia}" />
+      </td>
+    </tr>
+  `).join("");
+}
+
+function collectParqueaderoReglas() {
+  return Array.from(document.querySelectorAll("#cfg-reglas-tbody tr")).map((row) => ({
+    row,
+    dia_codigo: row.dataset.dia,
+    aplica: row.querySelector('[data-field="aplica"]').value === "true",
+    hora_inicio_gratis: row.querySelector('[data-field="hora_inicio_gratis"]').value,
+    hora_fin_gratis: row.querySelector('[data-field="hora_fin_gratis"]').value,
+    minutos_gracia: Number(row.querySelector('[data-field="minutos_gracia"]').value || 0),
+  })).map((rule) => {
+    const inicio = parseHoraCompletaInput(rule.hora_inicio_gratis);
+    const fin = parseHoraCompletaInput(rule.hora_fin_gratis);
+
+    if (inicio === null || fin === null) {
+      throw new Error(`Revise las horas del día ${rule.dia_codigo}. Use horas completas como 7, 07:00, 7 AM o 7:00 PM.`);
+    }
+
+    return {
+      dia_codigo: rule.dia_codigo,
+      aplica: rule.aplica,
+      hora_inicio_gratis: inicio,
+      hora_fin_gratis: fin,
+      minutos_gracia: rule.minutos_gracia,
+    };
+  });
+}
+
+async function loadParqueaderoConfig() {
+  try {
+    const config = await apiFetch('/api/configuracion/parqueadero');
+    document.getElementById('cfg-pq-modulo-activo').checked = Boolean(config.general?.modulo_activo);
+    document.getElementById('cfg-pq-solo-facturacion').checked = Boolean(config.general?.solo_facturacion);
+    setInputValue('cfg-pq-valet', config.general?.valor_valet_parking || 0);
+    setVehicleConfig('carro', config.vehiculos?.CARRO);
+    setVehicleConfig('moto', config.vehiculos?.MOTO);
+    renderParqueaderoReglas(config.reglas || []);
+  } catch (error) {
+    console.error('Error cargando configuración de parqueadero:', error);
+    showError(error.message || 'Error al cargar la configuración de parqueadero', 'pq-config-error');
+  }
+}
+
+async function handleGuardarParqueaderoConfig(event) {
+  event.preventDefault();
+
+  const payload = {
+    general: {
+      modulo_activo: document.getElementById('cfg-pq-modulo-activo')?.checked || false,
+      solo_facturacion: document.getElementById('cfg-pq-solo-facturacion')?.checked || false,
+      valor_valet_parking: getNumberValue('cfg-pq-valet'),
+    },
+    vehiculos: {
+      CARRO: getVehicleConfig('carro'),
+      MOTO: getVehicleConfig('moto'),
+    },
+    reglas: collectParqueaderoReglas(),
+  };
+
+  try {
+    const response = await apiFetch('/api/configuracion/parqueadero', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    const config = response.config || response;
+    setVehicleConfig('carro', config.vehiculos?.CARRO);
+    setVehicleConfig('moto', config.vehiculos?.MOTO);
+    renderParqueaderoReglas(config.reglas || []);
+    showSuccess('Configuración de parqueadero actualizada', 'pq-config-success');
+  } catch (error) {
+    showError(error.message, 'pq-config-error');
+  }
+}
+
+function toggleParqueaderoConfig() {
+  const body = document.getElementById('form-parqueadero-config');
+  const chevron = document.getElementById('parqueadero-config-chevron');
+  if (!body) return;
+
+  body.classList.toggle('hidden');
+  if (chevron) chevron.textContent = body.classList.contains('hidden') ? '›' : '▾';
+}
+
+async function handleActualizarEmpresa(event) {
+  event.preventDefault();
+
+  const logoFile = document.getElementById('empresa-logo-file')?.files?.[0];
+  const data = {
+    nombre: document.getElementById('empresa-nombre').value,
+    nit: document.getElementById('empresa-nit').value,
+    ciudad: document.getElementById('empresa-ciudad').value,
+    direccion: document.getElementById('empresa-direccion').value,
+    telefono: document.getElementById('empresa-telefono').value,
+    email_contacto: document.getElementById('empresa-email').value,
+    zona_horaria: document.getElementById('empresa-zona-horaria').value,
+  };
+
+  try {
+    if (logoFile) {
+      await uploadEmpresaLogo(logoFile);
+    }
+
+    await apiFetch('/api/empresa', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+
+    showSuccess('Empresa actualizada exitosamente', 'empresa-success');
+    // Actualizar sidebar
+    document.getElementById('sidebar-empresa').textContent = data.nombre;
+    localStorage.setItem(STORAGE.EMPRESA, data.nombre);
+    await loadConfig();
+
+  } catch (error) {
+    showError(error.message, 'empresa-error');
+  }
+}
+
+function updateLogoPreview(logoUrl, empresaNombre) {
+  const preview = document.getElementById('logo-preview');
+  if (!preview) return;
+  preview.innerHTML = '';
+
+  if (logoUrl) {
+    const img = document.createElement('img');
+    img.src = logoUrl;
+    img.alt = 'Logo de la empresa';
+    preview.appendChild(img);
+  } else {
+    preview.textContent = 'Sin logo';
+  }
+
+  const logoCircle = document.querySelector('.sidebar-logo-circle');
+  if (logoCircle) {
+    if (logoUrl) {
+      logoCircle.style.backgroundImage = `url(${logoUrl})`;
+      logoCircle.style.backgroundSize = 'cover';
+      logoCircle.style.backgroundPosition = 'center';
+      logoCircle.textContent = '';
+    } else {
+      logoCircle.style.backgroundImage = 'none';
+      logoCircle.textContent = empresaNombre ? empresaNombre.slice(0, 1).toUpperCase() : 'A';
+    }
+  }
+}
+
+function updateSidebarLogo(logoUrl, empresaNombre) {
+  const logoCircle = document.querySelector('.sidebar-logo-circle');
+  if (!logoCircle) return;
+
+  if (logoUrl) {
+    logoCircle.style.backgroundImage = `url(${logoUrl})`;
+    logoCircle.style.backgroundSize = 'cover';
+    logoCircle.style.backgroundPosition = 'center';
+    logoCircle.textContent = '';
+  } else {
+    logoCircle.style.backgroundImage = 'none';
+    logoCircle.textContent = empresaNombre ? empresaNombre.slice(0, 1).toUpperCase() : 'A';
+  }
+}
+
+async function handleLogoFileChange(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    updateLogoPreview('', document.getElementById('empresa-nombre').value);
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const preview = document.getElementById('logo-preview');
+    if (!preview) return;
+    preview.innerHTML = '';
+    const img = document.createElement('img');
+    img.src = reader.result;
+    img.alt = 'Vista previa del logo';
+    preview.appendChild(img);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function uploadEmpresaLogo(file) {
+  const formData = new FormData();
+  formData.append('logo', file);
+
+  const result = await apiFetch('/api/empresa/logo', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (result.logo_url) {
+    updateLogoPreview(result.logo_url, document.getElementById('empresa-nombre').value);
+  }
+
+  return result;
+}
+
+async function handleVerLicencias() {
+  try {
+    const licencias = await apiFetch('/api/licencias');
+    const grid = document.getElementById('licencias-grid');
+    grid.innerHTML = '';
+
+    licencias.forEach(licencia => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <h4>${licencia.nombre}</h4>
+        <p>${licencia.descripcion || 'Sin descripción'}</p>
+        <p><strong>Precio:</strong> $${licencia.precio || 0}</p>
+      `;
+      grid.appendChild(card);
+    });
+
+    document.getElementById('licencias-lista').hidden = false;
+  } catch (error) {
+    showError('Error al cargar licencias');
+  }
+}
+
+async function handleAsignarLicencia() {
+  // Por simplicidad, mostrar un prompt o modal simple
+  const licenciaId = prompt('ID de la licencia a asignar:');
+  const fechaInicio = prompt('Fecha de inicio (YYYY-MM-DD):', new Date().toISOString().split('T')[0]);
+  const fechaFin = prompt('Fecha de fin (YYYY-MM-DD, opcional):');
+
+  if (!licenciaId || !fechaInicio) return;
+
+  try {
+    await apiFetch('/api/licencias/asignar', {
+      method: 'POST',
+      body: JSON.stringify({
+        empresa_id: JSON.parse(localStorage.getItem('user_info')).empresa_id,
+        licencia_id: parseInt(licenciaId),
+        fecha_inicio: fechaInicio,
+        fecha_fin: fechaFin || null,
+      }),
+    });
+
+    showSuccess('Licencia asignada exitosamente');
+    loadLicenciaInfo();
+  } catch (error) {
+    showError(error.message);
+  }
+}
+
+async function handleNotificarVencimientos() {
+  try {
+    const result = await apiFetch('/api/licencias/enviar-notificaciones', {
+      method: 'POST',
+    });
+    showSuccess(`Notificaciones enviadas: ${result.enviados}, Errores: ${result.errores}`);
+  } catch (error) {
+    showError(error.message);
+  }
 }
 
 /* ======================================================
@@ -1132,6 +1979,7 @@ async function cargarHistorialParqueadero() {
       <tr>
         <td>${item.placa}</td>
         <td>${item.tipo_vehiculo}</td>
+        <td>${servicioParqueaderoLabel(item.tipo_servicio)}</td>
         <td>${item.nombre_cliente || "-"}</td>
         <td>${formatDateTime(item.hora_entrada)}</td>
         <td>${formatDateTime(item.hora_salida)}</td>

@@ -19,6 +19,9 @@ const pagosRoutes = require("./routes/pagos");
 const alertasRoutes = require("./routes/alertas");
 const auditorialRoutes = require("./routes/auditoria");
 const reportesParqueaderoRoutes = require("./routes/reportes-parqueadero");
+const licenciasRoutes = require("./routes/licencias");
+const configuracionRoutes = require("./routes/configuracion");
+const verificarLicencia = require("./middleware/licencia");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -40,13 +43,13 @@ app.get("/api/ping", (req, res) => {
 // Rutas públicas (sin auth)
 app.use("/api", authRoutes);
 
-// Rutas privadas (con auth)
+// Rutas privadas (con auth y verificación de licencia)
 app.use("/api/clientes", authMiddleware, clientesRoutes);
 app.use("/api/vehiculos", authMiddleware, vehiculosRoutes);
-app.use("/api/parqueadero", authMiddleware, parqueaderoRoutes);
+app.use("/api/parqueadero", authMiddleware, verificarLicencia, parqueaderoRoutes);
 app.use("/api/empleados", authMiddleware, empleadosRoutes);
-app.use("/api/lavadero", authMiddleware, lavaderoRoutes);
-app.use("/api/taller", authMiddleware, tallerRoutes);
+app.use("/api/lavadero", authMiddleware, verificarLicencia, lavaderoRoutes);
+app.use("/api/taller", authMiddleware, verificarLicencia, tallerRoutes);
 app.use("/api/reportes", authMiddleware, reportesRoutes);
 
 // Rutas de parqueadero avanzado
@@ -55,6 +58,10 @@ app.use("/api/pagos", authMiddleware, pagosRoutes);
 app.use("/api/alertas", authMiddleware, alertasRoutes);
 app.use("/api/auditoria", authMiddleware, auditorialRoutes);
 app.use("/api/reportes/parqueadero", authMiddleware, reportesParqueaderoRoutes);
+app.use("/api/configuracion", authMiddleware, configuracionRoutes);
+
+// Rutas de licencias (solo admin)
+app.use("/api/licencias", licenciasRoutes);
 
 
 

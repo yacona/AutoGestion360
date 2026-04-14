@@ -105,50 +105,116 @@
         </header>
 
         <section id="view-dashboard" class="view visible">
-          <div class="cards-grid">
-            <div class="card">
-              <h3>Vehículos en parqueadero</h3>
-              <p id="dash-parqueadero-count" class="big-number">0</p>
-            </div>
-            <div class="card">
-              <h3>Lavados en curso</h3>
-              <p id="dash-lavados-count" class="big-number">0</p>
-            </div>
-            <div class="card">
-              <h3>Órdenes de taller activas</h3>
-              <p id="dash-taller-count" class="big-number">0</p>
-            </div>
-          </div>
-
-          <div class="cards-grid">
-            <div class="card">
-              <h3>Ingresos del día</h3>
-              <div class="income-grid">
-                <div>
-                  <span class="label">Parqueadero</span>
-                  <span id="dash-ing-parqueadero" class="money">$ 0</span>
-                </div>
-                <div>
-                  <span class="label">Lavadero</span>
-                  <span id="dash-ing-lavadero" class="money">$ 0</span>
-                </div>
-                <div>
-                  <span class="label">Taller</span>
-                  <span id="dash-ing-taller" class="money">$ 0</span>
-                </div>
-                <div class="income-total">
-                  <span class="label">Total</span>
-                  <span id="dash-ing-total" class="money">$ 0</span>
+          <div class="dashboard-shell">
+            <div class="dashboard-header">
+              <div>
+                <span id="dash-date-eyebrow" class="eyebrow">Hoy</span>
+                <h3 id="dash-current-date">Dashboard</h3>
+              </div>
+              <div class="dashboard-controls">
+                <label for="dash-fecha">Ver fecha</label>
+                <input type="date" id="dash-fecha" />
+                <button type="button" id="btn-dash-hoy" class="btn btn-secondary btn-sm">Hoy</button>
+                <div class="dashboard-status">
+                  <span class="status-dot"></span>
+                  Operación en vivo
                 </div>
               </div>
             </div>
 
-            <div class="card">
-              <h3>Ingresos últimos días</h3>
-              <div id="dash-chart-empty" class="chart-empty" hidden>
-                No hay datos para el rango seleccionado.
+            <div class="dashboard-kpis">
+              <div class="metric-card">
+                <span class="metric-icon">P</span>
+                <span class="metric-label">Vehículos en parqueadero</span>
+                <strong id="dash-parqueadero-count" class="metric-value">0</strong>
+                <small id="dash-parqueadero-note">Activos ahora</small>
               </div>
-              <div id="dash-chart" class="chart-bars"></div>
+              <div class="metric-card">
+                <span class="metric-icon">L</span>
+                <span class="metric-label">Lavados cerrados</span>
+                <strong id="dash-lavados-count" class="metric-value">0</strong>
+                <small>En la fecha elegida</small>
+              </div>
+              <div class="metric-card">
+                <span class="metric-icon">T</span>
+                <span class="metric-label">Órdenes entregadas</span>
+                <strong id="dash-taller-count" class="metric-value">0</strong>
+                <small>En la fecha elegida</small>
+              </div>
+              <div class="metric-card metric-money">
+                <span class="metric-icon">$</span>
+                <span class="metric-label">Ingresos de la fecha</span>
+                <strong id="dash-ing-total" class="metric-value">$ 0</strong>
+                <small id="dash-services-total">0 servicios cerrados</small>
+              </div>
+            </div>
+
+            <div class="dashboard-grid">
+              <div class="dashboard-panel occupancy-panel">
+                <div class="panel-heading">
+                  <h3>Ocupación parqueadero</h3>
+                  <span id="dash-occupancy-detail">0 de 0 espacios</span>
+                </div>
+                <div class="occupancy-visual">
+                  <svg viewBox="0 0 120 120" class="ring-chart" aria-label="Ocupación parqueadero">
+                    <circle class="ring-bg" cx="60" cy="60" r="46"></circle>
+                    <circle id="dash-occupancy-ring" class="ring-value" cx="60" cy="60" r="46"></circle>
+                  </svg>
+                  <div class="ring-center">
+                    <strong id="dash-occupancy-percent">0%</strong>
+                    <span>ocupado</span>
+                  </div>
+                </div>
+                <div id="dash-active-types" class="type-pills"></div>
+              </div>
+
+              <div class="dashboard-panel revenue-panel">
+                <div class="panel-heading">
+                  <h3>Ingresos por módulo</h3>
+                  <span id="dash-revenue-total-label">$ 0</span>
+                </div>
+                <div class="revenue-stack" aria-label="Distribución de ingresos">
+                  <div id="dash-revenue-parqueadero-bar" class="revenue-segment segment-parqueadero"></div>
+                  <div id="dash-revenue-lavadero-bar" class="revenue-segment segment-lavadero"></div>
+                  <div id="dash-revenue-taller-bar" class="revenue-segment segment-taller"></div>
+                </div>
+                <div class="income-grid">
+                  <div>
+                    <span class="label">Parqueadero</span>
+                    <span id="dash-ing-parqueadero" class="money">$ 0</span>
+                  </div>
+                  <div>
+                    <span class="label">Lavadero</span>
+                    <span id="dash-ing-lavadero" class="money">$ 0</span>
+                  </div>
+                  <div>
+                    <span class="label">Taller</span>
+                    <span id="dash-ing-taller" class="money">$ 0</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dashboard-panel trend-panel">
+                <div class="panel-heading">
+                  <h3>Tendencia semanal</h3>
+                  <span id="dash-trend-range">Últimos 7 días</span>
+                </div>
+                <div id="dash-chart-empty" class="chart-empty" hidden>
+                  No hay datos para el rango seleccionado.
+                </div>
+                <svg id="dash-trend-svg" class="trend-svg" viewBox="0 0 640 220" preserveAspectRatio="none" aria-label="Ingresos últimos días">
+                  <defs>
+                    <linearGradient id="trend-fill" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stop-color="#22c55e" stop-opacity="0.28"></stop>
+                      <stop offset="100%" stop-color="#22c55e" stop-opacity="0"></stop>
+                    </linearGradient>
+                  </defs>
+                  <path id="dash-trend-area" class="trend-area"></path>
+                  <polyline id="dash-trend-line" class="trend-line"></polyline>
+                  <g id="dash-trend-points"></g>
+                </svg>
+                <div id="dash-chart" class="chart-bars"></div>
+              </div>
             </div>
           </div>
         </section>
@@ -156,11 +222,57 @@
         <!-- Vistas de módulos (por ahora placeholders) -->
         <section id="view-parqueadero" class="view">
           <div class="cards-grid">
+            <div class="card card-full pq-action-card">
+              <h3>Parqueadero</h3>
+              <div class="module-actions">
+                <button type="button" id="btn-pq-ingreso-ocasional" class="module-action-btn active">
+                  <span class="action-icon">⏱</span>
+                  <span>
+                    <strong>Ingreso por horas</strong>
+                    <small>Usuario ocasional</small>
+                  </span>
+                </button>
+                <button type="button" id="btn-pq-ingreso-dia" class="module-action-btn">
+                  <span class="action-icon">☀</span>
+                  <span>
+                    <strong>Ingreso por día</strong>
+                    <small>Tarifa diaria</small>
+                  </span>
+                </button>
+                <button type="button" id="btn-pq-ingreso-mensualidad" class="module-action-btn">
+                  <span class="action-icon">🔐</span>
+                  <span>
+                    <strong>Ingreso mensualidad</strong>
+                    <small>Cliente ya activo</small>
+                  </span>
+                </button>
+                <button type="button" id="btn-pq-alta-mensualidad" class="module-action-btn">
+                  <span class="action-icon">🪪</span>
+                  <span>
+                    <strong>Alta mensual</strong>
+                    <small>Crear cliente</small>
+                  </span>
+                </button>
+              </div>
+              <div id="pq-flow-explainer" class="flow-explainer">
+                <strong>Ingreso mensualidad</strong> registra la entrada de un cliente que ya tiene mensualidad activa. <strong>Alta mensual</strong> crea o renueva esa mensualidad con datos del cliente, vehículo, vigencia y valor.
+              </div>
+            </div>
+
             <!-- Formulario de entrada -->
-            <div class="card card-full">
-              <h3>Registrar entrada</h3>
+            <div id="pq-panel-ingreso" class="card card-full pq-subform-card">
+              <h3 id="pq-ingreso-title">Registrar ingreso por horas</h3>
+              <p id="pq-ingreso-help" class="small-text">Registra vehículos ocasionales por fracciones u horas. El nombre puede quedar vacío y se guardará como usuario genérico.</p>
               <form id="form-parqueadero-entrada">
                 <div class="form-row">
+                  <div class="form-group hidden">
+                    <label for="pq-servicio">Tipo de servicio *</label>
+                    <select id="pq-servicio" required>
+                      <option value="OCASIONAL_HORA">Ocasional por horas</option>
+                      <option value="OCASIONAL_DIA">Ocasional por día</option>
+                      <option value="MENSUALIDAD">Cliente mensualidad</option>
+                    </select>
+                  </div>
                   <div class="form-group">
                     <label for="pq-placa">Placa *</label>
                     <input
@@ -171,6 +283,9 @@
                       maxlength="10"
                     />
                   </div>
+                </div>
+
+                <div class="form-row">
                   <div class="form-group">
                     <label for="pq-tipo">Tipo de vehículo *</label>
                    <select id="pq-tipo" class="form-control" required>
@@ -191,6 +306,7 @@
                       id="pq-nombre"
                       placeholder="Opcional"
                     />
+                    <p id="pq-nombre-help" class="small-text">Para usuarios ocasionales puede quedar vacío; se registrará como usuario genérico.</p>
                   </div>
                   <div class="form-group">
                     <label for="pq-telefono">Teléfono</label>
@@ -241,6 +357,115 @@
               </form>
             </div>
 
+            <!-- Clientes mensualidad -->
+            <div id="pq-panel-alta-mensualidad" class="card card-expand pq-subform-card hidden">
+              <h3>Alta de cliente por mensualidad</h3>
+              <p class="small-text">Crea el cliente, su vehículo, vigencia, valor mensual y datos de contacto para futuros ingresos por mensualidad.</p>
+              <form id="form-parqueadero-mensualidad">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-men-nombre">Nombre completo *</label>
+                    <input type="text" id="pq-men-nombre" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-men-documento">Documento *</label>
+                    <input type="text" id="pq-men-documento" required />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-men-telefono">Teléfono</label>
+                    <input type="tel" id="pq-men-telefono" />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-men-correo">Correo</label>
+                    <input type="email" id="pq-men-correo" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-men-direccion">Dirección</label>
+                    <input type="text" id="pq-men-direccion" />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-men-emergencia">Contacto de emergencia</label>
+                    <input type="text" id="pq-men-emergencia" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-men-placa">Placa *</label>
+                    <input type="text" id="pq-men-placa" required maxlength="10" />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-men-tipo">Tipo de vehículo *</label>
+                    <select id="pq-men-tipo" required>
+                      <option value="CARRO">CARRO</option>
+                      <option value="MOTO">MOTO</option>
+                      <option value="BICICLETA">BICICLETA</option>
+                      <option value="CUATRIMOTO">CUATRIMOTO</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-men-marca">Marca</label>
+                    <input type="text" id="pq-men-marca" />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-men-modelo">Modelo</label>
+                    <input type="text" id="pq-men-modelo" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-men-color">Color</label>
+                    <input type="text" id="pq-men-color" />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-men-valor">Valor mensual *</label>
+                    <input type="number" id="pq-men-valor" min="0" step="1000" required />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="pq-men-inicio">Inicio *</label>
+                    <input type="date" id="pq-men-inicio" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="pq-men-fin">Fin *</label>
+                    <input type="date" id="pq-men-fin" required />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="pq-men-obs">Observaciones</label>
+                  <textarea id="pq-men-obs" rows="2" placeholder="Condiciones de la mensualidad, cupo, notas de pago..."></textarea>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Dar de alta mensualidad</button>
+                </div>
+                <div id="pq-men-msg" class="small-message" hidden></div>
+              </form>
+
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>Placa</th>
+                      <th>Tipo</th>
+                      <th>Vigencia</th>
+                      <th>Valor</th>
+                      <th>Ingresos</th>
+                      <th>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pq-mensualidades-tbody"></tbody>
+                </table>
+                <div id="pq-mensualidades-empty" class="table-empty">No hay mensualidades activas.</div>
+              </div>
+            </div>
+
             <!-- Vehículos activos -->
             <div class="card card-expand">
               <h3>Vehículos en parqueadero</h3>
@@ -250,6 +475,7 @@
                     <tr>
                       <th>Placa</th>
                       <th>Tipo</th>
+                      <th>Servicio</th>
                       <th>Cliente</th>
                       <th>Entrada</th>
                       <th>Tiempo</th>
@@ -277,6 +503,7 @@
                     <tr>
                       <th>Placa</th>
                       <th>Tipo</th>
+                      <th>Servicio</th>
                       <th>Cliente</th>
                       <th>Entrada</th>
                       <th>Salida</th>
@@ -703,9 +930,258 @@
         </section>
 
         <section id="view-config" class="view">
-          <div class="card">
-            <h3>Configuración</h3>
-            <p>Configuración de empresa, logo, zona horaria y licenciamiento (pendiente).</p>
+          <div class="cards-grid">
+            <div class="card card-full config-tabs-card">
+              <h3>Configuración</h3>
+              <div class="config-tabs" role="tablist" aria-label="Secciones de configuración">
+                <button type="button" class="config-tab active" data-config-tab="empresa">
+                  <span>🏢</span>
+                  Empresa
+                </button>
+                <button type="button" class="config-tab" data-config-tab="parqueadero">
+                  <span>🅿</span>
+                  Parqueadero
+                </button>
+                <button type="button" class="config-tab" data-config-tab="licencias">
+                  <span>🪪</span>
+                  Licencias
+                </button>
+                <button type="button" class="config-tab" data-config-tab="apariencia">
+                  <span>◐</span>
+                  Apariencia
+                </button>
+              </div>
+            </div>
+
+            <!-- Información de la Empresa -->
+            <div class="card card-full config-panel" data-config-panel="empresa">
+              <h3>Información de la Empresa</h3>
+              <form id="form-empresa">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-nombre">Nombre *</label>
+                    <input type="text" id="empresa-nombre" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-nit">NIT</label>
+                    <input type="text" id="empresa-nit" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-ciudad">Ciudad</label>
+                    <input type="text" id="empresa-ciudad" />
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-direccion">Dirección</label>
+                    <input type="text" id="empresa-direccion" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-telefono">Teléfono</label>
+                    <input type="tel" id="empresa-telefono" />
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-email">Email de Contacto</label>
+                    <input type="email" id="empresa-email" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-zona-horaria">Zona Horaria</label>
+                    <select id="empresa-zona-horaria">
+                      <option value="America/Bogota">America/Bogota</option>
+                      <option value="America/Mexico_City">America/Mexico_City</option>
+                      <option value="America/Santiago">America/Santiago</option>
+                      <option value="America/Lima">America/Lima</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-logo-file">Subir logo local</label>
+                    <input type="file" id="empresa-logo-file" accept="image/*" />
+                    <div id="logo-preview" class="logo-preview">Sin logo</div>
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Actualizar Empresa</button>
+                <div id="empresa-error" class="error-message" hidden></div>
+                <div id="empresa-success" class="success-message" hidden></div>
+              </form>
+            </div>
+
+            <!-- Configuración Parqueadero -->
+            <div class="card card-full parking-config-card config-panel hidden" data-config-panel="parqueadero">
+              <button type="button" id="btn-toggle-parqueadero-config" class="config-toggle">
+                <span>Configuración Parqueadero - Clic Aquí</span>
+                <span id="parqueadero-config-chevron">▾</span>
+              </button>
+
+              <form id="form-parqueadero-config" class="parking-config-body">
+                <div class="checkbox-row">
+                  <label>
+                    <input type="checkbox" id="cfg-pq-modulo-activo" />
+                    Activar Módulo
+                  </label>
+                  <label>
+                    <input type="checkbox" id="cfg-pq-solo-facturacion" />
+                    Mostrar Solo Facturación
+                  </label>
+                </div>
+
+                <div class="form-group">
+                  <label for="cfg-pq-valet">Valor de valet parking</label>
+                  <input type="number" id="cfg-pq-valet" min="0" step="100" />
+                </div>
+
+                <div class="vehicle-config-section">
+                  <h3>Vehículos / Carros</h3>
+                  <div class="form-group">
+                    <label for="cfg-carro-bahias">Número de Bahías Vehículos / Carros</label>
+                    <input type="number" id="cfg-carro-bahias" min="0" />
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="cfg-carro-valor-dia">Valor Día</label>
+                      <input type="number" id="cfg-carro-valor-dia" min="0" step="100" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cfg-carro-fraccion-dia">Fracción Día en Minutos</label>
+                      <input type="number" id="cfg-carro-fraccion-dia" min="1" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="cfg-carro-valor-primera">Valor Primera Fracción</label>
+                      <input type="number" id="cfg-carro-valor-primera" min="0" step="100" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cfg-carro-tiempo-primera">Tiempo Primera Fracción</label>
+                      <input type="number" id="cfg-carro-tiempo-primera" min="1" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="cfg-carro-valor-segunda">Valor Segunda Fracción</label>
+                      <input type="number" id="cfg-carro-valor-segunda" min="0" step="100" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cfg-carro-tiempo-segunda">Tiempo Segunda Fracción</label>
+                      <input type="number" id="cfg-carro-tiempo-segunda" min="1" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="vehicle-config-section">
+                  <h3>Motos</h3>
+                  <div class="form-group">
+                    <label for="cfg-moto-bahias">Número de Bahías Motos</label>
+                    <input type="number" id="cfg-moto-bahias" min="0" />
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="cfg-moto-valor-dia">Valor Día</label>
+                      <input type="number" id="cfg-moto-valor-dia" min="0" step="100" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cfg-moto-fraccion-dia">Fracción Día en Minutos</label>
+                      <input type="number" id="cfg-moto-fraccion-dia" min="1" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="cfg-moto-valor-primera">Valor Primera Fracción</label>
+                      <input type="number" id="cfg-moto-valor-primera" min="0" step="100" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cfg-moto-tiempo-primera">Tiempo Primera Fracción</label>
+                      <input type="number" id="cfg-moto-tiempo-primera" min="1" />
+                    </div>
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="cfg-moto-valor-segunda">Valor Segunda Fracción</label>
+                      <input type="number" id="cfg-moto-valor-segunda" min="0" step="100" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cfg-moto-tiempo-segunda">Tiempo Segunda Fracción</label>
+                      <input type="number" id="cfg-moto-tiempo-segunda" min="1" />
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rules-section">
+                  <h3>Reglas de precios y horarios</h3>
+                  <p class="small-text">Las horas aceptan formato 24 horas o AM/PM: 7, 07:00, 7 AM, 7:00 AM, 19 o 7 PM. Solo horas completas.</p>
+                  <div class="table-wrapper">
+                    <table class="table config-rules-table">
+                      <thead>
+                        <tr>
+                          <th>Aplica</th>
+                          <th>Día</th>
+                          <th>Inicio hora gratis</th>
+                          <th>Fin hora gratis</th>
+                          <th>Minutos de gracia</th>
+                        </tr>
+                      </thead>
+                      <tbody id="cfg-reglas-tbody"></tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Guardar Configuración Parqueadero</button>
+                </div>
+                <div id="pq-config-error" class="error-message" hidden></div>
+                <div id="pq-config-success" class="success-message" hidden></div>
+              </form>
+            </div>
+
+            <div class="card card-full config-panel hidden" data-config-panel="apariencia">
+              <h3>Apariencia</h3>
+              <p class="small-text">Elige cómo quieres ver el sistema en este navegador.</p>
+              <div class="theme-options">
+                <button type="button" class="theme-option active" data-theme-option="dark">
+                  <span class="theme-preview theme-preview-dark"></span>
+                  <strong>Modo oscuro</strong>
+                  <small>Mayor contraste en ambientes de baja luz.</small>
+                </button>
+                <button type="button" class="theme-option" data-theme-option="light">
+                  <span class="theme-preview theme-preview-light"></span>
+                  <strong>Modo claro</strong>
+                  <small>Ideal para recepción o pantallas con mucha luz.</small>
+                </button>
+              </div>
+            </div>
+
+            <!-- Licencia Actual -->
+            <div class="card config-panel hidden" data-config-panel="licencias">
+              <h3>Licencia Actual</h3>
+              <div id="licencia-info">
+                <p><strong>Tipo:</strong> <span id="licencia-nombre">-</span></p>
+                <p><strong>Inicio:</strong> <span id="licencia-inicio">-</span></p>
+                <p><strong>Vencimiento:</strong> <span id="licencia-fin">-</span></p>
+                <p><strong>Estado:</strong> <span id="licencia-estado">-</span></p>
+                <div id="licencia-modulos">
+                  <p><strong>Módulos incluidos:</strong></p>
+                  <ul id="modulos-lista"></ul>
+                </div>
+              </div>
+              <button id="btn-renovar-licencia" class="btn btn-secondary hidden">Renovar Licencia</button>
+            </div>
+
+            <!-- Gestión de Licencias (Solo Admin) -->
+            <div id="admin-licencias" class="card card-full config-panel hidden" data-config-panel="licencias" data-admin-only="true">
+              <h3>Gestión de Licencias</h3>
+              <div class="form-row">
+                <button id="btn-ver-licencias" class="btn btn-outline">Ver Todas las Licencias</button>
+                <button id="btn-asignar-licencia" class="btn btn-outline">Asignar Licencia</button>
+                <button id="btn-notificar-vencimientos" class="btn btn-outline">Notificar Vencimientos</button>
+              </div>
+              <div id="licencias-lista" class="mt-3" hidden>
+                <h4>Licencias Disponibles</h4>
+                <div id="licencias-grid" class="cards-grid"></div>
+              </div>
+            </div>
           </div>
         </section>
       </main>
@@ -792,6 +1268,7 @@
             <option value="TARJETA">💳 Tarjeta débito/crédito</option>
             <option value="TRANSFERENCIA">📱 Transferencia bancaria</option>
             <option value="MIXTO">💰 Pago mixto</option>
+            <option value="MENSUALIDAD">Mensualidad activa</option>
             <option value="OTRO">❓ Otro método</option>
           </select>
         </div>

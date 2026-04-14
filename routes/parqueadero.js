@@ -5,8 +5,120 @@ const auth = require("../middleware/auth");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const {
+  calculateParkingCharge,
+  getParqueaderoConfig,
+} = require("../utils/parqueadero-config");
 
 const router = express.Router();
+
+const SERVICIOS_PARQUEADERO = new Set([
+  "OCASIONAL_HORA",
+  "OCASIONAL_DIA",
+  "MENSUALIDAD",
+]);
+
+function normalizarServicioParqueadero(value) {
+  const servicio = limpiarTexto(value || "OCASIONAL_HORA").toUpperCase();
+  return SERVICIOS_PARQUEADERO.has(servicio) ? servicio : "OCASIONAL_HORA";
+}
+
+async function ensureParqueaderoFlexibleSchema(queryable = db) {
+  await queryable.query(`
+    CREATE TABLE IF NOT EXISTS mensualidades_parqueadero (
+      id BIGSERIAL PRIMARY KEY,
+      empresa_id BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+      cliente_id BIGINT REFERENCES clientes(id) ON DELETE SET NULL,
+      vehiculo_id BIGINT REFERENCES vehiculos(id) ON DELETE SET NULL,
+      placa VARCHAR(20) NOT NULL,
+      tipo_vehiculo VARCHAR(30) NOT NULL,
+      nombre_cliente VARCHAR(150) NOT NULL,
+      documento VARCHAR(40),
+      telefono VARCHAR(40),
+      correo VARCHAR(120),
+      direccion VARCHAR(150),
+      contacto_emergencia VARCHAR(150),
+      fecha_inicio DATE NOT NULL,
+      fecha_fin DATE NOT NULL,
+      valor_mensual NUMERIC(12,2) DEFAULT 0,
+      estado VARCHAR(30) DEFAULT 'ACTIVA',
+      observaciones TEXT,
+      creado_en TIMESTAMPTZ DEFAULT NOW(),
+      actualizado_en TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
+  await queryable.query(`
+    CREATE INDEX IF NOT EXISTS mensualidades_parqueadero_empresa_placa_idx
+    ON mensualidades_parqueadero (empresa_id, placa, estado)
+  `);
+
+  await queryable.query(`
+    ALTER TABLE parqueadero
+    ADD COLUMN IF NOT EXISTS tipo_servicio VARCHAR(30) DEFAULT 'OCASIONAL_HORA'
+  `);
+
+  await queryable.query(`
+    ALTER TABLE parqueadero
+    ADD COLUMN IF NOT EXISTS mensualidad_id BIGINT
+  `);
+}
+
+async function buscarMensualidadActiva(queryable, empresaId, { placa, mensualidadId }) {
+  const params = [empresaId];
+  let whereExtra = "";
+
+  if (mensualidadId) {
+    params.push(mensualidadId);
+    whereExtra = `AND mp.id = $${params.length}`;
+  } else {
+    params.push(placa);
+    whereExtra = `AND mp.placa = $${params.length}`;
+  }
+
+  const { rows } = await queryable.query(
+    `SELECT mp.*, c.id AS cliente_id_db, v.id AS vehiculo_id_db
+     FROM mensualidades_parqueadero mp
+     LEFT JOIN clientes c ON c.id = mp.cliente_id
+     LEFT JOIN vehiculos v ON v.id = mp.vehiculo_id
+     WHERE mp.empresa_id = $1
+       ${whereExtra}
+       AND mp.estado = 'ACTIVA'
+       AND CURRENT_DATE BETWEEN mp.fecha_inicio AND mp.fecha_fin
+     ORDER BY mp.fecha_fin DESC
+     LIMIT 1`,
+    params
+  );
+
+  return rows[0] || null;
+}
+
+function aplicarTipoServicioAlCobro(cobro, tarifa, tipoServicio) {
+  if (tipoServicio === "MENSUALIDAD") {
+    return {
+      valor_total: 0,
+      valor_antes_descuento: 0,
+      porcentaje_descuento: 0,
+      descuento_aplicado: false,
+      minutos_cobrados: 0,
+      tarifa_aplicada: "Mensualidad activa",
+    };
+  }
+
+  if (tipoServicio === "OCASIONAL_DIA" && tarifa?.valor_dia) {
+    const valorDia = Number(tarifa.valor_dia);
+    if (Number.isFinite(valorDia) && valorDia > cobro.valor_total) {
+      return {
+        ...cobro,
+        valor_total: Math.ceil(valorDia),
+        valor_antes_descuento: Math.ceil(valorDia),
+        tarifa_aplicada: `$${valorDia} dia`,
+      };
+    }
+  }
+
+  return cobro;
+}
 
 // Configurar multer para evidencias
 const evidenciaDir = path.join(__dirname, "..", "uploads", "parqueadero");
@@ -96,6 +208,8 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
       conductor_documento,
       conductor_telefono,
 
+      tipo_servicio,
+      mensualidad_id,
       observaciones,
     } = req.body || {};
 
@@ -110,6 +224,8 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
     // Normalizar datos
     placa = normalizarPlaca(placa);
     tipo_vehiculo = limpiarTexto(tipo_vehiculo).toUpperCase();
+    tipo_servicio = normalizarServicioParqueadero(tipo_servicio);
+    mensualidad_id = mensualidad_id ? Number(mensualidad_id) : null;
     observaciones = limpiarTexto(observaciones);
 
     propietario_nombre = limpiarTexto(propietario_nombre);
@@ -129,14 +245,13 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
     }
 
     if (typeof es_conductor_propietario !== "boolean") {
-      return res
-        .status(400)
-        .json({ error: "Debe indicar si el conductor es el propietario (true/false)." });
+      es_conductor_propietario = true;
     }
 
     // Abrimos transacción en una sola conexión del pool
     client = await db.connect();
     await client.query("BEGIN");
+    await ensureParqueaderoFlexibleSchema(client);
 
     // 1) Verificar que NO haya un registro abierto para esa placa
     const { rows: abiertos } = await client.query(
@@ -157,6 +272,31 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
         error:
           "Ya existe una entrada activa para esta placa. Debe registrar la salida antes de una nueva entrada.",
       });
+    }
+
+    let mensualidadActiva = null;
+    if (tipo_servicio === "MENSUALIDAD") {
+      mensualidadActiva = await buscarMensualidadActiva(client, empresa_id, {
+        placa,
+        mensualidadId: mensualidad_id,
+      });
+
+      if (!mensualidadActiva) {
+        await client.query("ROLLBACK");
+        client.release();
+        client = null;
+        return res.status(400).json({
+          error: "No hay una mensualidad activa y vigente para esta placa.",
+        });
+      }
+
+      mensualidad_id = mensualidadActiva.id;
+      propietario_nombre = mensualidadActiva.nombre_cliente;
+      propietario_documento = mensualidadActiva.documento || "";
+      propietario_telefono = mensualidadActiva.telefono || "";
+      propietario_correo = mensualidadActiva.correo || "";
+      conductor_nombre = conductor_nombre || mensualidadActiva.nombre_cliente;
+      conductor_telefono = conductor_telefono || mensualidadActiva.telefono || "";
     }
 
     // 2) Buscar si el vehículo ya existe
@@ -180,19 +320,9 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
 
     if (vehiculos.length === 0) {
       // 🚗 Vehículo NUEVO en el sistema
-      if (!propietario_nombre) {
-        await client.query("ROLLBACK");
-        client.release();
-        client = null;
-        return res.status(400).json({
-          error:
-            "Vehículo nuevo. Debe registrar al menos nombre del propietario.",
-        });
-      }
-
       // 2.1) Buscar si ya existe un cliente con ese documento (solo si hay documento válido)
       let clienteRow;
-      if (propietario_documento && propietario_documento !== "SIN_DOCUMENTO") {
+      if (propietario_nombre && propietario_documento && propietario_documento !== "SIN_DOCUMENTO") {
         const { rows: clientesDoc } = await client.query(
           `SELECT id, nombre, documento, telefono, correo
            FROM clientes
@@ -208,7 +338,7 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
       }
 
       // 2.2) Si no existe cliente, lo creamos
-      if (!clienteRow) {
+      if (!clienteRow && propietario_nombre) {
         const insertCliente = await client.query(
           `INSERT INTO clientes
            (empresa_id, nombre, documento, telefono, correo)
@@ -225,14 +355,16 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
         clienteRow = insertCliente.rows[0];
       }
 
-      propietario_cliente_id = clienteRow.id;
-      propietario_final = {
-        id: clienteRow.id,
-        nombre: clienteRow.nombre,
-        documento: clienteRow.documento,
-        telefono: clienteRow.telefono,
-        correo: clienteRow.correo,
-      };
+      if (clienteRow) {
+        propietario_cliente_id = clienteRow.id;
+        propietario_final = {
+          id: clienteRow.id,
+          nombre: clienteRow.nombre,
+          documento: clienteRow.documento,
+          telefono: clienteRow.telefono,
+          correo: clienteRow.correo,
+        };
+      }
 
       // 2.3) Crear el vehículo
       const insertVehiculo = await client.query(
@@ -240,10 +372,20 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
          (empresa_id, cliente_id, placa, tipo_vehiculo)
          VALUES ($1, $2, $3, $4)
          RETURNING id`,
-        [empresa_id, propietario_cliente_id, placa, tipo_vehiculo]
+        [empresa_id, propietario_cliente_id || null, placa, tipo_vehiculo]
       );
 
       vehiculo_id = insertVehiculo.rows[0].id;
+      if (mensualidadActiva && !mensualidadActiva.vehiculo_id) {
+        await client.query(
+          `UPDATE mensualidades_parqueadero
+           SET vehiculo_id = $1,
+               cliente_id = COALESCE(cliente_id, $2),
+               actualizado_en = NOW()
+           WHERE id = $3 AND empresa_id = $4`,
+          [vehiculo_id, propietario_cliente_id || null, mensualidadActiva.id, empresa_id]
+        );
+      }
     } else {
       // 🚗 Vehículo YA EXISTE
       const v = vehiculos[0];
@@ -340,6 +482,17 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
       }
     }
 
+    if (mensualidadActiva && vehiculo_id && !mensualidadActiva.vehiculo_id) {
+      await client.query(
+        `UPDATE mensualidades_parqueadero
+         SET vehiculo_id = $1,
+             cliente_id = COALESCE(cliente_id, $2),
+             actualizado_en = NOW()
+         WHERE id = $3 AND empresa_id = $4`,
+        [vehiculo_id, propietario_cliente_id || null, mensualidadActiva.id, empresa_id]
+      );
+    }
+
     // 3) Resolver datos del CONDUCTOR (persona que ingresa)
     let nombre_conductor_final = conductor_nombre;
     let telefono_conductor_final = conductor_telefono;
@@ -352,7 +505,7 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
         conductor_telefono || propietario_telefono || propietario_final.telefono;
     } else {
       // El que ingresa NO es el propietario
-      if (!conductor_nombre || !conductor_documento) {
+      if (tipo_servicio === "MENSUALIDAD" && (!conductor_nombre || !conductor_documento)) {
         await client.query("ROLLBACK");
         client.release();
         client = null;
@@ -361,6 +514,12 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
             "Si el conductor NO es el propietario, debe registrar al menos nombre y documento del conductor.",
         });
       }
+    }
+
+    if (!nombre_conductor_final) {
+      nombre_conductor_final = tipo_servicio === "MENSUALIDAD"
+        ? mensualidadActiva.nombre_cliente
+        : "USUARIO GENERICO";
     }
 
     // 4) Insertar registro de entrada en PARQUEADERO
@@ -379,9 +538,12 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
          conductor_telefono,
          es_propietario,   -- indica si el conductor es el propietario
          observaciones,
-         evidencia_url
+         evidencia_url,
+         tipo_servicio,
+         mensualidad_id,
+         estado_pago
        )
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        RETURNING *`,
       [
         empresa_id,
@@ -397,6 +559,9 @@ router.post("/entrada", auth, upload.single("evidencia"), async (req, res) => {
         es_conductor_propietario,
         observaciones || null,
         evidencia_url,
+        tipo_servicio,
+        mensualidad_id || null,
+        tipo_servicio === "MENSUALIDAD" ? "MENSUALIDAD" : "PENDIENTE",
       ]
     );
 
@@ -519,6 +684,7 @@ router.get("/buscar/:placa", auth, async (req, res) => {
   const placa = normalizarPlaca(placaRaw);
 
   try {
+    await ensureParqueaderoFlexibleSchema();
     // 1️⃣ Buscar vehículo y propietario actual (si existe)
     const { rows: vehiculos } = await db.query(
       `SELECT
@@ -542,6 +708,10 @@ router.get("/buscar/:placa", auth, async (req, res) => {
     );
 
     const vehiculo = vehiculos[0] || null;
+    const mensualidadActiva = await buscarMensualidadActiva(db, empresa_id, {
+      placa,
+      mensualidadId: null,
+    });
 
     // 2️⃣ Historial de PARQUEADERO (últimos 10 registros)
     const { rows: histParqueadero } = await db.query(
@@ -552,6 +722,8 @@ router.get("/buscar/:placa", auth, async (req, res) => {
          minutos_total,
          valor_total,
          metodo_pago,
+         tipo_servicio,
+         mensualidad_id,
          observaciones
        FROM parqueadero
        WHERE empresa_id = $1
@@ -602,7 +774,7 @@ router.get("/buscar/:placa", auth, async (req, res) => {
     // 5️⃣ Respuesta unificada
     res.json({
       placa,
-      existe: !!vehiculo,
+      existe: !!vehiculo || !!mensualidadActiva,
       vehiculo: vehiculo
         ? {
             id: vehiculo.id,
@@ -612,7 +784,16 @@ router.get("/buscar/:placa", auth, async (req, res) => {
             modelo: vehiculo.modelo,
             color: vehiculo.color,
           }
-        : null,
+        : mensualidadActiva
+          ? {
+              id: mensualidadActiva.vehiculo_id,
+              placa: mensualidadActiva.placa,
+              tipo_vehiculo: mensualidadActiva.tipo_vehiculo,
+              marca: null,
+              modelo: null,
+              color: null,
+            }
+          : null,
       propietario: vehiculo
         ? {
             id: vehiculo.propietario_id,
@@ -621,7 +802,16 @@ router.get("/buscar/:placa", auth, async (req, res) => {
             telefono: vehiculo.propietario_telefono,
             correo: vehiculo.propietario_correo,
           }
-        : null,
+        : mensualidadActiva
+          ? {
+              id: mensualidadActiva.cliente_id,
+              nombre: mensualidadActiva.nombre_cliente,
+              documento: mensualidadActiva.documento,
+              telefono: mensualidadActiva.telefono,
+              correo: mensualidadActiva.correo,
+            }
+          : null,
+      mensualidad: mensualidadActiva,
       historial: {
         parqueadero: histParqueadero,
         lavadero: histLavadero,
@@ -671,7 +861,7 @@ router.post("/salida/:id", auth, async (req, res) => {
     }
 
     // Validar que metodo_pago es requerido y válido
-    const metodos_validos = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "OTRO"];
+    const metodos_validos = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "MENSUALIDAD", "OTRO"];
     if (!metodo_pago) {
       return res.status(400).json({ 
         error: "Debe especificar el método de pago (EFECTIVO, TARJETA, TRANSFERENCIA u OTRO)." 
@@ -686,10 +876,11 @@ router.post("/salida/:id", auth, async (req, res) => {
     // Abrimos transacción en una sola conexión del pool
     client = await db.connect();
     await client.query("BEGIN");
+    await ensureParqueaderoFlexibleSchema(client);
 
     // 1) Buscar el registro activo por ID y empresa
     const { rows: activos } = await client.query(
-      `SELECT id, hora_entrada, tipo_vehiculo, placa
+      `SELECT id, hora_entrada, tipo_vehiculo, placa, tipo_servicio, mensualidad_id
        FROM parqueadero
        WHERE id = $1
          AND empresa_id = $2
@@ -715,30 +906,22 @@ router.post("/salida/:id", auth, async (req, res) => {
     const minutos_total = Math.ceil(diffMs / (1000 * 60));
 
     // 3) Obtener tarifa configurada para este tipo de vehículo
+    const configParqueadero = await getParqueaderoConfig(empresa_id, client);
     const { rows: tarifas } = await client.query(
-      `SELECT tarifa_por_hora, tarifa_minima, descuento_prolongada_horas, descuento_prolongada_porcentaje
+      `SELECT *
        FROM tarifas WHERE empresa_id = $1 AND tipo_vehiculo = $2 AND activo = TRUE`,
       [empresa_id, registro.tipo_vehiculo]
     );
-
-    let tarifa_por_hora = 1000;
-    let tarifa_minima = null;
-    let porcentaje_descuento = 0;
-
-    if (tarifas.length > 0) {
-      const tarifa = tarifas[0];
-      tarifa_por_hora = parseFloat(tarifa.tarifa_por_hora);
-      tarifa_minima = tarifa.tarifa_minima ? parseFloat(tarifa.tarifa_minima) : null;
-      porcentaje_descuento = tarifas.length > 0 && tarifas[0].descuento_prolongada_horas &&
-        minutos_total / 60 >= tarifas[0].descuento_prolongada_horas
-        ? parseFloat(tarifas[0].descuento_prolongada_porcentaje) || 0
-        : 0;
-    }
-
-    const horas_total = minutos_total / 60;
-    let valor_total = Math.ceil(horas_total * tarifa_por_hora);
-    if (tarifa_minima && valor_total < tarifa_minima) valor_total = Math.ceil(tarifa_minima);
-    if (porcentaje_descuento > 0) valor_total = Math.ceil(valor_total * (1 - porcentaje_descuento / 100));
+    const tarifa = configParqueadero.vehiculos[registro.tipo_vehiculo] || tarifas[0] || {};
+    let cobro = calculateParkingCharge({
+      minutosTotal: minutos_total,
+      horaEntrada: hora_entrada,
+      horaSalida: hora_salida,
+      tarifa,
+      reglas: configParqueadero.reglas,
+    });
+    cobro = aplicarTipoServicioAlCobro(cobro, tarifa, registro.tipo_servicio);
+    const valor_total = cobro.valor_total;
 
     // 5) Actualizar el registro
     const updateQuery = await client.query(
@@ -775,7 +958,7 @@ router.post("/salida/:id", auth, async (req, res) => {
         tiempo_total_minutos: minutos_total,
         tiempo_total_horas: (minutos_total / 60).toFixed(2),
         valor_total: valor_total,
-        tarifa_aplicada: `${tarifa_por_hora} COP/hora`,
+        tarifa_aplicada: cobro.tarifa_aplicada,
       },
     });
   } catch (err) {
@@ -803,11 +986,14 @@ router.get("/activo", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
 
   try {
+    await ensureParqueaderoFlexibleSchema();
     const { rows } = await db.query(
       `SELECT
          p.id,
          p.placa,
          p.tipo_vehiculo,
+         p.tipo_servicio,
+         p.mensualidad_id,
          p.nombre_cliente,
          p.telefono,
          p.hora_entrada,
@@ -840,11 +1026,14 @@ router.get("/historial", auth, async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 50, 200);
 
   try {
+    await ensureParqueaderoFlexibleSchema();
     const { rows } = await db.query(
       `SELECT
          p.id,
          p.placa,
          p.tipo_vehiculo,
+         p.tipo_servicio,
+         p.mensualidad_id,
          p.nombre_cliente,
          p.hora_entrada,
          p.hora_salida,
@@ -867,6 +1056,246 @@ router.get("/historial", auth, async (req, res) => {
 });
 
 /**
+ * GET /api/parqueadero/mensualidades
+ *
+ * Lista clientes con mensualidad de parqueadero.
+ */
+router.get("/mensualidades", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const incluirInactivas = req.query.incluir_inactivas === "true";
+
+  try {
+    await ensureParqueaderoFlexibleSchema();
+    const { rows } = await db.query(
+      `SELECT
+         mp.*,
+         COUNT(p.id)::int AS ingresos_registrados,
+         MAX(p.hora_entrada) AS ultimo_ingreso
+       FROM mensualidades_parqueadero mp
+       LEFT JOIN parqueadero p ON p.mensualidad_id = mp.id AND p.empresa_id = mp.empresa_id
+       WHERE mp.empresa_id = $1
+         AND ($2::boolean = TRUE OR mp.estado = 'ACTIVA')
+       GROUP BY mp.id
+       ORDER BY mp.estado, mp.fecha_fin ASC, mp.nombre_cliente ASC`,
+      [empresa_id, incluirInactivas]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Error obteniendo mensualidades:", err);
+    res.status(500).json({ error: "Error obteniendo mensualidades." });
+  }
+});
+
+/**
+ * POST /api/parqueadero/mensualidades
+ *
+ * Crea un cliente/vehículo con mensualidad activa.
+ */
+router.post("/mensualidades", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  let client;
+
+  try {
+    let {
+      nombre_cliente,
+      documento,
+      telefono,
+      correo,
+      direccion,
+      contacto_emergencia,
+      placa,
+      tipo_vehiculo,
+      marca,
+      modelo,
+      color,
+      fecha_inicio,
+      fecha_fin,
+      valor_mensual,
+      observaciones,
+    } = req.body || {};
+
+    nombre_cliente = limpiarTexto(nombre_cliente).toUpperCase();
+    documento = limpiarTexto(documento);
+    telefono = limpiarTexto(telefono);
+    correo = limpiarTexto(correo);
+    direccion = limpiarTexto(direccion);
+    contacto_emergencia = limpiarTexto(contacto_emergencia);
+    placa = normalizarPlaca(placa);
+    tipo_vehiculo = limpiarTexto(tipo_vehiculo).toUpperCase();
+    marca = limpiarTexto(marca).toUpperCase();
+    modelo = limpiarTexto(modelo).toUpperCase();
+    color = limpiarTexto(color).toUpperCase();
+    observaciones = limpiarTexto(observaciones);
+    valor_mensual = Number(valor_mensual || 0);
+
+    if (!nombre_cliente || !documento || !placa || !tipo_vehiculo || !fecha_inicio || !fecha_fin) {
+      return res.status(400).json({
+        error: "Nombre, documento, placa, tipo de vehículo, inicio y fin son obligatorios.",
+      });
+    }
+
+    if (!Number.isFinite(valor_mensual) || valor_mensual < 0) {
+      return res.status(400).json({ error: "El valor mensual no es válido." });
+    }
+
+    client = await db.connect();
+    await client.query("BEGIN");
+    await ensureParqueaderoFlexibleSchema(client);
+
+    let clienteRow;
+    const { rows: clientesDoc } = await client.query(
+      `SELECT id, nombre, documento, telefono, correo
+       FROM clientes
+       WHERE empresa_id = $1 AND documento = $2
+       LIMIT 1`,
+      [empresa_id, documento]
+    );
+
+    if (clientesDoc.length > 0) {
+      const { rows } = await client.query(
+        `UPDATE clientes
+         SET nombre = $1,
+             telefono = COALESCE($2, telefono),
+             correo = COALESCE($3, correo)
+         WHERE id = $4 AND empresa_id = $5
+         RETURNING id, nombre, documento, telefono, correo`,
+        [nombre_cliente, telefono || null, correo || null, clientesDoc[0].id, empresa_id]
+      );
+      clienteRow = rows[0];
+    } else {
+      const { rows } = await client.query(
+        `INSERT INTO clientes (empresa_id, nombre, documento, telefono, correo)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING id, nombre, documento, telefono, correo`,
+        [empresa_id, nombre_cliente, documento, telefono || null, correo || null]
+      );
+      clienteRow = rows[0];
+    }
+
+    let vehiculoRow;
+    const { rows: vehiculos } = await client.query(
+      `SELECT id FROM vehiculos WHERE empresa_id = $1 AND placa = $2 LIMIT 1`,
+      [empresa_id, placa]
+    );
+
+    if (vehiculos.length > 0) {
+      const { rows } = await client.query(
+        `UPDATE vehiculos
+         SET cliente_id = $1,
+             tipo_vehiculo = $2,
+             marca = COALESCE($3, marca),
+             modelo = COALESCE($4, modelo),
+             color = COALESCE($5, color)
+         WHERE id = $6 AND empresa_id = $7
+         RETURNING id`,
+        [clienteRow.id, tipo_vehiculo, marca || null, modelo || null, color || null, vehiculos[0].id, empresa_id]
+      );
+      vehiculoRow = rows[0];
+    } else {
+      const { rows } = await client.query(
+        `INSERT INTO vehiculos (empresa_id, cliente_id, placa, tipo_vehiculo, marca, modelo, color)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING id`,
+        [empresa_id, clienteRow.id, placa, tipo_vehiculo, marca || null, modelo || null, color || null]
+      );
+      vehiculoRow = rows[0];
+    }
+
+    await client.query(
+      `UPDATE mensualidades_parqueadero
+       SET estado = 'INACTIVA', actualizado_en = NOW()
+       WHERE empresa_id = $1 AND placa = $2 AND estado = 'ACTIVA'`,
+      [empresa_id, placa]
+    );
+
+    const { rows: mensualidades } = await client.query(
+      `INSERT INTO mensualidades_parqueadero
+       (empresa_id, cliente_id, vehiculo_id, placa, tipo_vehiculo, nombre_cliente, documento,
+        telefono, correo, direccion, contacto_emergencia, fecha_inicio, fecha_fin,
+        valor_mensual, estado, observaciones)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'ACTIVA',$15)
+       RETURNING *`,
+      [
+        empresa_id,
+        clienteRow.id,
+        vehiculoRow.id,
+        placa,
+        tipo_vehiculo,
+        nombre_cliente,
+        documento,
+        telefono || null,
+        correo || null,
+        direccion || null,
+        contacto_emergencia || null,
+        fecha_inicio,
+        fecha_fin,
+        valor_mensual,
+        observaciones || null,
+      ]
+    );
+
+    await client.query("COMMIT");
+    client.release();
+    client = null;
+
+    res.status(201).json({
+      mensaje: "Mensualidad registrada correctamente.",
+      mensualidad: mensualidades[0],
+      cliente: clienteRow,
+      vehiculo: vehiculoRow,
+    });
+  } catch (err) {
+    console.error("Error creando mensualidad:", err);
+    try {
+      if (client) await client.query("ROLLBACK");
+    } catch (_) {}
+    if (client) client.release();
+    res.status(500).json({ error: err.message || "Error creando mensualidad." });
+  }
+});
+
+/**
+ * GET /api/parqueadero/mensualidades/:id/historial
+ */
+router.get("/mensualidades/:id/historial", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const mensualidad_id = req.params.id;
+
+  try {
+    await ensureParqueaderoFlexibleSchema();
+    const { rows: mensualidades } = await db.query(
+      `SELECT * FROM mensualidades_parqueadero
+       WHERE id = $1 AND empresa_id = $2`,
+      [mensualidad_id, empresa_id]
+    );
+
+    if (mensualidades.length === 0) {
+      return res.status(404).json({ error: "Mensualidad no encontrada." });
+    }
+
+    const { rows: historial } = await db.query(
+      `SELECT id, placa, tipo_vehiculo, tipo_servicio, nombre_cliente, hora_entrada,
+              hora_salida, minutos_total, valor_total, metodo_pago, observaciones
+       FROM parqueadero
+       WHERE empresa_id = $1
+         AND (mensualidad_id = $2 OR placa = $3)
+       ORDER BY hora_entrada DESC
+       LIMIT 100`,
+      [empresa_id, mensualidad_id, mensualidades[0].placa]
+    );
+
+    res.json({
+      mensualidad: mensualidades[0],
+      historial,
+    });
+  } catch (err) {
+    console.error("Error obteniendo historial de mensualidad:", err);
+    res.status(500).json({ error: "Error obteniendo historial de mensualidad." });
+  }
+});
+
+/**
  * GET /api/parqueadero/:id
  *
  * Obtiene detalles completos de un registro específico para editar o visualizar antes de salida
@@ -879,12 +1308,15 @@ router.get("/:id", auth, async (req, res) => {
     if (!registro_id || isNaN(registro_id)) {
       return res.status(400).json({ error: "ID de registro inválido." });
     }
+    await ensureParqueaderoFlexibleSchema();
 
     const { rows } = await db.query(
       `SELECT
          p.id,
          p.placa,
          p.tipo_vehiculo,
+         p.tipo_servicio,
+         p.mensualidad_id,
          p.nombre_cliente,
          p.telefono,
          NULL::text AS documento_cliente,
@@ -1052,10 +1484,11 @@ router.post("/:id/pre-salida", auth, async (req, res) => {
     if (!registro_id || isNaN(registro_id)) {
       return res.status(400).json({ error: "ID de registro inválido." });
     }
+    await ensureParqueaderoFlexibleSchema();
 
     // Buscar registro activo
     const { rows: activos } = await db.query(
-      `SELECT id, hora_entrada, tipo_vehiculo, placa, nombre_cliente, valor_total
+      `SELECT id, hora_entrada, tipo_vehiculo, placa, nombre_cliente, valor_total, tipo_servicio, mensualidad_id
        FROM parqueadero
        WHERE id = $1 AND empresa_id = $2 AND hora_salida IS NULL`,
       [registro_id, empresa_id]
@@ -1077,54 +1510,38 @@ router.post("/:id/pre-salida", auth, async (req, res) => {
     const horas_total = minutos_total / 60;
 
     // Obtener tarifa
+    const configParqueadero = await getParqueaderoConfig(empresa_id);
     const { rows: tarifas } = await db.query(
-      `SELECT tarifa_por_hora, tarifa_minima, descuento_prolongada_horas, descuento_prolongada_porcentaje
+      `SELECT *
        FROM tarifas WHERE empresa_id = $1 AND tipo_vehiculo = $2 AND activo = TRUE`,
       [empresa_id, registro.tipo_vehiculo]
     );
-
-    let tarifa_por_hora = 1000;
-    let tarifa_minima = null;
-    let porcentaje_descuento = 0;
-    let descuento_aplicado = false;
-
-    if (tarifas.length > 0) {
-      const tarifa = tarifas[0];
-      tarifa_por_hora = parseFloat(tarifa.tarifa_por_hora);
-      tarifa_minima = tarifa.tarifa_minima ? parseFloat(tarifa.tarifa_minima) : null;
-      
-      if (tarifas[0].descuento_prolongada_horas && 
-          horas_total >= tarifas[0].descuento_prolongada_horas) {
-        porcentaje_descuento = parseFloat(tarifas[0].descuento_prolongada_porcentaje) || 0;
-        descuento_aplicado = true;
-      }
-    }
-
-    let valor_total = Math.ceil(horas_total * tarifa_por_hora);
-    if (tarifa_minima && valor_total < tarifa_minima) {
-      valor_total = Math.ceil(tarifa_minima);
-    }
-
-    const valor_antes_descuento = valor_total;
-    if (porcentaje_descuento > 0) {
-      valor_total = Math.ceil(valor_total * (1 - porcentaje_descuento / 100));
-    }
+    const tarifa = configParqueadero.vehiculos[registro.tipo_vehiculo] || tarifas[0] || {};
+    let cobro = calculateParkingCharge({
+      minutosTotal: minutos_total,
+      horaEntrada: hora_entrada,
+      horaSalida: hora_salida,
+      tarifa,
+      reglas: configParqueadero.reglas,
+    });
+    cobro = aplicarTipoServicioAlCobro(cobro, tarifa, registro.tipo_servicio);
 
     res.json({
       registro_id,
       placa: registro.placa,
       cliente: registro.nombre_cliente,
       tipo_vehiculo: registro.tipo_vehiculo,
+      tipo_servicio: registro.tipo_servicio,
       hora_entrada: hora_entrada.toLocaleString("es-CO"),
       hora_salida: hora_salida.toLocaleString("es-CO"),
       tiempo_estancia: `${Math.floor(horas_total)}h ${minutos_total % 60}m`,
       minutos_total,
       horas_total: horas_total.toFixed(2),
-      tarifa_aplicada: `$${tarifa_por_hora} COP/hora`,
-      tarifa_minima: tarifa_minima ? `$${tarifa_minima} COP` : "No aplica",
-      descuento: descuento_aplicado ? `${porcentaje_descuento}%` : "No aplica",
-      valor_antes_descuento,
-      valor_a_cobrar: valor_total,
+      tarifa_aplicada: cobro.tarifa_aplicada,
+      tarifa_minima: tarifa.tarifa_minima ? `$${tarifa.tarifa_minima} COP` : "No aplica",
+      descuento: cobro.descuento_aplicado ? `${cobro.porcentaje_descuento}%` : "No aplica",
+      valor_antes_descuento: cobro.valor_antes_descuento,
+      valor_a_cobrar: cobro.valor_total,
       metodos_pago: ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "OTRO"],
     });
   } catch (err) {
