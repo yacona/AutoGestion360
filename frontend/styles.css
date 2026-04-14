@@ -235,12 +235,18 @@ body {
 /* Sidebar */
 
 .sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
   width: var(--sidebar-width);
   background: rgba(15, 23, 42, 0.98);
   border-right: 1px solid rgba(31, 41, 55, 0.9);
   display: flex;
   flex-direction: column;
   padding: 1rem 0.75rem;
+  z-index: 100;
+  overflow-y: auto;
 }
 
 .sidebar-header {
@@ -321,6 +327,7 @@ body {
   display: flex;
   flex-direction: column;
   padding: 0;
+  margin-left: var(--sidebar-width);
 }
 
 .topbar {
@@ -755,6 +762,8 @@ body {
   }
 
   .sidebar {
+    position: static;
+    height: auto;
     width: 100%;
     flex-direction: row;
     align-items: center;
@@ -778,6 +787,10 @@ body {
 
   .sidebar-footer {
     display: none;
+  }
+
+  .main-content {
+    margin-left: 0;
   }
 
   .topbar {
