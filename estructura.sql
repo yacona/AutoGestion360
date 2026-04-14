@@ -230,7 +230,9 @@ CREATE TABLE public.taller_ordenes (
     estado character varying(30) DEFAULT 'Diagnóstico'::character varying NOT NULL,
     fecha_creacion timestamp with time zone DEFAULT now() NOT NULL,
     fecha_entrega timestamp with time zone,
-    total_orden numeric(14,2) DEFAULT 0
+    total_orden numeric(14,2) DEFAULT 0,
+    metodo_pago character varying(30),
+    detalle_pago jsonb
 );
 
 
@@ -252,7 +254,9 @@ CREATE VIEW public.ordenes_taller AS
     taller_ordenes.estado,
     taller_ordenes.fecha_creacion,
     taller_ordenes.fecha_entrega,
-    taller_ordenes.total_orden
+    taller_ordenes.total_orden,
+    taller_ordenes.metodo_pago,
+    taller_ordenes.detalle_pago
    FROM public.taller_ordenes;
 
 
@@ -398,6 +402,47 @@ ALTER TABLE public.taller_ordenes_id_seq OWNER TO victor;
 --
 
 ALTER SEQUENCE public.taller_ordenes_id_seq OWNED BY public.taller_ordenes.id;
+
+
+--
+-- Name: tarifas; Type: TABLE; Schema: public; Owner: victor
+--
+
+CREATE TABLE public.tarifas (
+    id bigint NOT NULL,
+    empresa_id bigint NOT NULL,
+    tipo_vehiculo character varying(30) NOT NULL,
+    tarifa_por_hora numeric(12,2) NOT NULL,
+    tarifa_minima numeric(12,2),
+    descuento_prolongada_horas integer,
+    descuento_prolongada_porcentaje numeric(5,2),
+    activo boolean DEFAULT true,
+    creado_en timestamp with time zone DEFAULT now(),
+    actualizado_en timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.tarifas OWNER TO victor;
+
+--
+-- Name: tarifas_id_seq; Type: SEQUENCE; Schema: public; Owner: victor
+--
+
+CREATE SEQUENCE public.tarifas_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER TABLE public.tarifas_id_seq OWNER TO victor;
+
+--
+-- Name: tarifas_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: victor
+--
+
+ALTER SEQUENCE public.tarifas_id_seq OWNED BY public.tarifas.id;
 
 
 --
@@ -567,6 +612,13 @@ ALTER TABLE ONLY public.taller_ordenes ALTER COLUMN id SET DEFAULT nextval('publ
 
 
 --
+-- Name: tarifas id; Type: DEFAULT; Schema: public; Owner: victor
+--
+
+ALTER TABLE ONLY public.tarifas ALTER COLUMN id SET DEFAULT nextval('public.tarifas_id_seq'::regclass);
+
+
+--
 -- Name: tipos_lavado id; Type: DEFAULT; Schema: public; Owner: victor
 --
 
@@ -644,6 +696,14 @@ ALTER TABLE ONLY public.taller_ordenes
 
 
 --
+-- Name: tarifas tarifas_pkey; Type: CONSTRAINT; Schema: public; Owner: victor
+--
+
+ALTER TABLE ONLY public.tarifas
+    ADD CONSTRAINT tarifas_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: tipos_lavado tipos_lavado_pkey; Type: CONSTRAINT; Schema: public; Owner: victor
 --
 
@@ -714,6 +774,13 @@ CREATE INDEX parqueadero_empresa_idx ON public.parqueadero USING btree (empresa_
 --
 
 CREATE UNIQUE INDEX taller_ordenes_empresa_orden_uniq ON public.taller_ordenes USING btree (empresa_id, numero_orden);
+
+
+--
+-- Name: tarifas_empresa_id_tipo_vehiculo_key; Type: INDEX; Schema: public; Owner: victor
+--
+
+CREATE UNIQUE INDEX tarifas_empresa_id_tipo_vehiculo_key ON public.tarifas USING btree (empresa_id, tipo_vehiculo);
 
 
 --
@@ -855,6 +922,14 @@ ALTER TABLE ONLY public.taller_ordenes
 
 ALTER TABLE ONLY public.taller_ordenes
     ADD CONSTRAINT taller_ordenes_vehiculo_id_fkey FOREIGN KEY (vehiculo_id) REFERENCES public.vehiculos(id);
+
+
+--
+-- Name: tarifas tarifas_empresa_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: victor
+--
+
+ALTER TABLE ONLY public.tarifas
+    ADD CONSTRAINT tarifas_empresa_id_fkey FOREIGN KEY (empresa_id) REFERENCES public.empresas(id) ON DELETE CASCADE;
 
 
 --

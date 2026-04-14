@@ -116,6 +116,7 @@ function changeView(view) {
 
   if (view === "parqueadero") {
     cargarParqueaderoActivo();
+    cargarHistorialParqueadero();
   }
   if (view === "dashboard") {
     loadDashboard();
@@ -182,50 +183,266 @@ function formatMoney(value) {
   });
 }
 
+function formatDateParam(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function renderDashboardChart(dias) {
+  const chart = document.getElementById("dash-chart");
+  const empty = document.getElementById("dash-chart-empty");
+  if (!chart || !empty) return;
+
+  const maxTotal = Math.max(...dias.map(dia => Number(dia.total_general || 0)), 0);
+
+  chart.innerHTML = "";
+
+  if (!dias.length || maxTotal <= 0) {
+    empty.hidden = false;
+    return;
+  }
+
+  empty.hidden = true;
+
+  chart.innerHTML = dias
+    .map(dia => {
+      const total = Number(dia.total_general || 0);
+      const width = total > 0 ? Math.max((total / maxTotal) * 100, 4) : 0;
+      return `
+        <div class="chart-row">
+          <span class="chart-date">${dia.fecha}</span>
+          <div class="chart-bar-wrapper">
+            <div class="chart-bar" style="width: ${width}%"></div>
+          </div>
+          <span class="chart-value">${formatMoney(total)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+let cobroServicioActual = null;
+
+function formatDateTime(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("es-CO");
+}
+
+function formatDuration(startValue, endValue = new Date()) {
+  if (!startValue) return "—";
+
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  const totalMinutes = Math.max(1, Math.round((end - start) / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours <= 0) return `${minutes} min`;
+  if (minutes === 0) return `${hours} h`;
+  return `${hours} h ${minutes} min`;
+}
+
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value ?? "—";
+}
+
+function actualizarCamposPagoServicio(selectId, referenciaGroupId, detalleGroupId) {
+  const metodo = document.getElementById(selectId)?.value || "";
+  const referenciaGroup = document.getElementById(referenciaGroupId);
+  const detalleGroup = document.getElementById(detalleGroupId);
+
+  if (referenciaGroup) {
+    referenciaGroup.hidden = !(metodo === "TARJETA" || metodo === "TRANSFERENCIA");
+  }
+
+  if (detalleGroup) {
+    detalleGroup.hidden = !(metodo === "OTRO" || metodo === "MIXTO");
+  }
+}
+
+function limpiarModalCobroServicio() {
+  ["cobro-metodo-pago", "cobro-referencia", "cobro-detalle-pago", "cobro-observaciones"]
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = "";
+    });
+
+  actualizarCamposPagoServicio(
+    "cobro-metodo-pago",
+    "cobro-referencia-group",
+    "cobro-detalle-pago-group"
+  );
+}
+
+async function abrirModalCobroServicio(modulo, id) {
+  limpiarModalCobroServicio();
+
+  if (modulo === "lavadero") {
+    const orden = await apiFetch(`/api/lavadero/${id}`);
+    const fin = new Date();
+
+    cobroServicioActual = {
+      modulo,
+      id,
+      estadoFinal: "Completado",
+      endpoint: `/api/lavadero/${id}`,
+      successMessageId: "lav-msg",
+      successMessage: "Lavado completado y cobro registrado.",
+      reload: async () => cargarOrdeneesLavadero(),
+    };
+
+    setText("cobro-servicio-title", "Completar lavado y registrar pago");
+    setText("cobro-servicio-placa", orden.placa || "—");
+    setText("cobro-servicio-tipo", orden.tipo_lavado_nombre || orden.tipo_lavado || "Lavado");
+    setText("cobro-servicio-responsable", orden.lavador_nombre || orden.empleado_nombre || "Sin asignar");
+    setText("cobro-servicio-estado", orden.estado || "—");
+    setText("cobro-servicio-cliente", orden.cliente_nombre || "No registrado");
+    setText("cobro-servicio-inicio", formatDateTime(orden.hora_inicio));
+    setText("cobro-servicio-fin", fin.toLocaleString("es-CO"));
+    setText("cobro-servicio-tiempo", formatDuration(orden.hora_inicio, fin));
+    setText("cobro-servicio-valor", formatMoney(orden.precio || 0));
+  }
+
+  if (modulo === "taller") {
+    const data = await apiFetch(`/api/taller/${id}`);
+    const orden = data.orden || data;
+    const fin = new Date();
+
+    cobroServicioActual = {
+      modulo,
+      id,
+      estadoFinal: "Entregado",
+      endpoint: `/api/taller/${id}`,
+      successMessageId: "tal-msg",
+      successMessage: "Orden entregada y cobro registrado.",
+      reload: async () => cargarOrdensTaller(),
+    };
+
+    setText("cobro-servicio-title", "Entregar orden de taller y registrar pago");
+    setText("cobro-servicio-placa", orden.placa || "—");
+    setText("cobro-servicio-tipo", orden.descripcion || orden.descripcion_falla || "Orden de taller");
+    setText("cobro-servicio-responsable", orden.mecanico_nombre || orden.empleado_nombre || "Sin asignar");
+    setText("cobro-servicio-estado", orden.estado || "—");
+    setText("cobro-servicio-cliente", orden.cliente_nombre || "No registrado");
+    setText("cobro-servicio-inicio", formatDateTime(orden.fecha_creacion));
+    setText("cobro-servicio-fin", fin.toLocaleString("es-CO"));
+    setText("cobro-servicio-tiempo", formatDuration(orden.fecha_creacion, fin));
+    setText("cobro-servicio-valor", formatMoney(orden.total_general || orden.total_orden || 0));
+  }
+
+  document.getElementById("modal-cobro-servicio")?.classList.remove("hidden");
+}
+
+function cerrarModalCobroServicio() {
+  document.getElementById("modal-cobro-servicio")?.classList.add("hidden");
+  cobroServicioActual = null;
+}
+
+async function confirmarCobroServicio() {
+  if (!cobroServicioActual) {
+    alert("No hay un servicio seleccionado para cobrar.");
+    return;
+  }
+
+  const metodoPago = document.getElementById("cobro-metodo-pago").value.trim();
+  if (!metodoPago) {
+    alert("Debe seleccionar un método de pago.");
+    return;
+  }
+
+  const referencia = document.getElementById("cobro-referencia").value.trim();
+  const detalle = document.getElementById("cobro-detalle-pago").value.trim();
+  const observaciones = document.getElementById("cobro-observaciones").value.trim();
+
+  const detallePago = {};
+  if (referencia) detallePago.referencia = referencia;
+  if (detalle) detallePago.detalle = detalle;
+  if (observaciones) detallePago.observaciones = observaciones;
+
+  try {
+    await apiFetch(cobroServicioActual.endpoint, {
+      method: "PATCH",
+      body: JSON.stringify({
+        estado: cobroServicioActual.estadoFinal,
+        metodo_pago: metodoPago,
+        detalle_pago: Object.keys(detallePago).length ? detallePago : null,
+      }),
+    });
+
+    const successMessageId = cobroServicioActual.successMessageId;
+    const successMessage = cobroServicioActual.successMessage;
+    const reload = cobroServicioActual.reload;
+
+    cerrarModalCobroServicio();
+    await reload();
+    await loadDashboard();
+    showMessage(successMessageId, successMessage);
+  } catch (err) {
+    showMessage(cobroServicioActual.successMessageId, err.message, true);
+  }
+}
+
 async function loadDashboard() {
   try {
     const activos = await apiFetch("/api/parqueadero/activo");
     document.getElementById("dash-parqueadero-count").textContent = activos.length;
-  } catch {}
+  } catch (err) {
+    console.error("Error cargando parqueadero dashboard:", err);
+  }
 
   try {
-    const lavados = await apiFetch("/api/lavadero?estado=En_Proceso");
-    document.getElementById("dash-lavados-count").textContent = lavados.length;
-  } catch {}
+    const lavados = await apiFetch("/api/lavadero");
+    const lavadosActivos = lavados.filter(lavado => lavado.estado !== "Completado");
+    document.getElementById("dash-lavados-count").textContent = lavadosActivos.length;
+  } catch (err) {
+    console.error("Error cargando lavadero dashboard:", err);
+  }
 
   try {
     const taller = await apiFetch("/api/taller");
     document.getElementById("dash-taller-count").textContent =
       taller.filter(t => t.estado !== "Entregado").length;
-  } catch {}
+  } catch (err) {
+    console.error("Error cargando taller dashboard:", err);
+  }
 
-  // Cargar ingresos del día
   try {
-    const resumenDia = await apiFetch("/api/reportes/parqueadero/resumen-dia");
-    const ingresosParqueadero = resumenDia.ingresos_totales || 0;
+    const hoy = new Date();
+    const hoyParam = formatDateParam(hoy);
+    const resumenDia = await apiFetch(`/api/reportes/resumen?desde=${hoyParam}&hasta=${hoyParam}`);
 
-    // Mostrar ingresos del parqueadero
     document.getElementById("dash-ing-parqueadero").textContent =
-      `$${ingresosParqueadero.toLocaleString("es-CO")} COP`;
-
-    // Calcular total (por ahora solo parqueadero, lavadero y taller en 0)
-    const ingresosLavadero = 0; // TODO: implementar cuando esté disponible
-    const ingresosTaller = 0;   // TODO: implementar cuando esté disponible
-    const totalIngresos = ingresosParqueadero + ingresosLavadero + ingresosTaller;
-
+      formatMoney(resumenDia.parqueadero?.total || 0);
     document.getElementById("dash-ing-lavadero").textContent =
-      `$${ingresosLavadero.toLocaleString("es-CO")} COP`;
+      formatMoney(resumenDia.lavadero?.total || 0);
     document.getElementById("dash-ing-taller").textContent =
-      `$${ingresosTaller.toLocaleString("es-CO")} COP`;
+      formatMoney(resumenDia.taller?.total || 0);
     document.getElementById("dash-ing-total").textContent =
-      `$${totalIngresos.toLocaleString("es-CO")} COP`;
+      formatMoney(resumenDia.total_general || 0);
   } catch (err) {
     console.error("Error cargando ingresos:", err);
-    // Valores por defecto si falla la carga
     document.getElementById("dash-ing-parqueadero").textContent = "$ 0";
     document.getElementById("dash-ing-lavadero").textContent = "$ 0";
     document.getElementById("dash-ing-taller").textContent = "$ 0";
     document.getElementById("dash-ing-total").textContent = "$ 0";
+  }
+
+  try {
+    const hasta = new Date();
+    const desde = new Date(hasta);
+    desde.setDate(hasta.getDate() - 6);
+
+    const diario = await apiFetch(
+      `/api/reportes/diario?desde=${formatDateParam(desde)}&hasta=${formatDateParam(hasta)}`
+    );
+
+    renderDashboardChart(diario.dias || []);
+  } catch (err) {
+    console.error("Error cargando gráfica dashboard:", err);
+    renderDashboardChart([]);
   }
 }
 /* ======================================================
@@ -627,6 +844,7 @@ async function confirmarSalida() {
 
     // Recargar tabla de activos
     await cargarParqueaderoActivo();
+    await cargarHistorialParqueadero();
     await loadDashboard();
   } catch (err) {
     console.error("Error registrando salida:", err);
@@ -639,20 +857,22 @@ document.addEventListener("DOMContentLoaded", function() {
   const selectPago = document.getElementById("pq-metodo-pago");
   if (selectPago) {
     selectPago.addEventListener("change", function() {
-      const referenciaGroup = document.getElementById("pq-referencia-group");
-      const detalleGroup = document.getElementById("pq-detalle-pago-group");
-      
-      if (this.value === "TARJETA" || this.value === "TRANSFERENCIA") {
-        referenciaGroup.hidden = false;
-      } else {
-        referenciaGroup.hidden = true;
-      }
-      
-      if (this.value === "OTRO" || this.value === "MIXTO") {
-        detalleGroup.hidden = false;
-      } else {
-        detalleGroup.hidden = true;
-      }
+      actualizarCamposPagoServicio(
+        "pq-metodo-pago",
+        "pq-referencia-group",
+        "pq-detalle-pago-group"
+      );
+    });
+  }
+
+  const selectCobro = document.getElementById("cobro-metodo-pago");
+  if (selectCobro) {
+    selectCobro.addEventListener("change", function() {
+      actualizarCamposPagoServicio(
+        "cobro-metodo-pago",
+        "cobro-referencia-group",
+        "cobro-detalle-pago-group"
+      );
     });
   }
 });
@@ -704,6 +924,11 @@ document.addEventListener("DOMContentLoaded", () => {
     .getElementById("lav-buscar")
     ?.addEventListener("input", () => cargarOrdeneesLavadero());
 
+  // Historial lavadero
+  document
+    .getElementById("lav-historial-buscar")
+    ?.addEventListener("input", () => cargarOrdeneesLavadero());
+
   // Taller
   document
     .getElementById("form-taller-nueva")
@@ -726,6 +951,16 @@ document.addEventListener("DOMContentLoaded", () => {
   document
     .getElementById("emp-filtro-rol")
     ?.addEventListener("change", filtrarEmpleadosPorRol);
+
+  // Historial parqueadero
+  document
+    .getElementById("pq-historial-buscar")
+    ?.addEventListener("input", () => cargarHistorialParqueadero());
+
+  // Historial taller
+  document
+    .getElementById("tal-historial-buscar")
+    ?.addEventListener("input", () => cargarOrdensTaller());
 
   // Reportes
   document
@@ -800,8 +1035,17 @@ async function handleNovaLavado(event) {
 async function cargarOrdeneesLavadero() {
   try {
     const ordenes = await apiFetch("/api/lavadero");
-    const activos = ordenes.filter(o => o.estado !== "Completado");
-    const completados = ordenes.filter(o => o.estado === "Completado" && new Date(o.hora_fin || o.creado_en).toDateString() === new Date().toDateString());
+    const historial = await apiFetch("/api/lavadero/historial");
+    const busqueda = document.getElementById("lav-buscar")?.value.trim().toLowerCase() || "";
+    const ordenesFiltradas = busqueda
+      ? ordenes.filter(o =>
+          `${o.placa || ""} ${o.empleado_nombre || ""} ${o.lavador_nombre || ""}`
+            .toLowerCase()
+            .includes(busqueda)
+        )
+      : ordenes;
+    const activos = ordenesFiltradas.filter(o => o.estado !== "Completado");
+    const completados = historial.filter(o => o.estado === "Completado");
 
     // Tabla activos
     const tbodyActivos = document.getElementById("lav-activos-tbody");
@@ -815,7 +1059,7 @@ async function cargarOrdeneesLavadero() {
           <td>${new Date(ord.hora_inicio).toLocaleString()}</td>
           <td><span class="badge">${ord.estado}</span></td>
           <td>
-            <button class="btn btn-sm btn-primary" onclick="marcarLavadoCompleto(${ord.id})">Completar</button>
+            <button class="btn btn-sm btn-primary" onclick="marcarLavadoCompleto(${ord.id})">Completar y cobrar</button>
           </td>
         </tr>
       `).join("");
@@ -825,18 +1069,26 @@ async function cargarOrdeneesLavadero() {
     // Tabla completados
     const tbodyCompletados = document.getElementById("lav-completados-tbody");
     const emptyCompletados = document.getElementById("lav-completados-empty");
+    const busquedaHistorial = document.getElementById("lav-historial-buscar")?.value.trim().toLowerCase() || "";
+    const completadosFiltrados = busquedaHistorial
+      ? completados.filter(o =>
+          `${o.placa || ""} ${o.tipo_lavado || ""} ${o.tipo_lavado_nombre || ""} ${o.lavador_nombre || ""} ${o.empleado_nombre || ""}`
+            .toLowerCase()
+            .includes(busquedaHistorial)
+        )
+      : completados;
     if (tbodyCompletados) {
-      tbodyCompletados.innerHTML = completados.map(ord => `
+      tbodyCompletados.innerHTML = completadosFiltrados.map(ord => `
         <tr>
           <td>${ord.placa}</td>
-          <td>${ord.tipo_lavado}</td>
-          <td>${ord.empleado_nombre || "Sin asignar"}</td>
-          <td>${ord.duracion_minutos || "N/A"} min</td>
+          <td>${ord.tipo_lavado_nombre || ord.tipo_lavado}</td>
+          <td>${ord.lavador_nombre || ord.empleado_nombre || "Sin asignar"}</td>
+          <td>${ord.hora_fin ? Math.max(1, Math.round((new Date(ord.hora_fin) - new Date(ord.hora_inicio)) / 60000)) : "N/A"} min</td>
           <td>${formatMoney(ord.precio)}</td>
-          <td>${ord.estado_pago || "No pagado"}</td>
+          <td>${ord.metodo_pago || "No registrado"}</td>
         </tr>
       `).join("");
-      emptyCompletados.hidden = completados.length > 0;
+      emptyCompletados.hidden = completadosFiltrados.length > 0;
     }
   } catch (err) {
     console.error("Error cargando órdenes de lavadero:", err);
@@ -845,14 +1097,53 @@ async function cargarOrdeneesLavadero() {
 
 async function marcarLavadoCompleto(id) {
   try {
-    await apiFetch(`/api/lavadero/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ estado: "Completado" }),
-    });
-    cargarOrdeneesLavadero();
-    showMessage("lav-msg", "Lavado marcado como completado.");
+    await abrirModalCobroServicio("lavadero", id);
   } catch (err) {
     showMessage("lav-msg", err.message, true);
+  }
+}
+
+async function cargarHistorialParqueadero() {
+  const tbody = document.getElementById("pq-historial-tbody");
+  const empty = document.getElementById("pq-historial-empty");
+
+  if (!tbody || !empty) return;
+
+  try {
+    const data = await apiFetch("/api/parqueadero/historial?limit=50");
+    const busqueda = document.getElementById("pq-historial-buscar")?.value.trim().toLowerCase() || "";
+    const dataFiltrada = busqueda
+      ? data.filter(item =>
+          `${item.placa || ""} ${item.tipo_vehiculo || ""} ${item.nombre_cliente || ""}`
+            .toLowerCase()
+            .includes(busqueda)
+        )
+      : data;
+    tbody.innerHTML = "";
+
+    if (!Array.isArray(dataFiltrada) || dataFiltrada.length === 0) {
+      empty.hidden = false;
+      return;
+    }
+
+    empty.hidden = true;
+
+    tbody.innerHTML = dataFiltrada.map(item => `
+      <tr>
+        <td>${item.placa}</td>
+        <td>${item.tipo_vehiculo}</td>
+        <td>${item.nombre_cliente || "-"}</td>
+        <td>${formatDateTime(item.hora_entrada)}</td>
+        <td>${formatDateTime(item.hora_salida)}</td>
+        <td>${item.minutos_total ? formatDuration(item.hora_entrada, item.hora_salida) : "-"}</td>
+        <td>${formatMoney(item.valor_total || 0)}</td>
+        <td>${item.metodo_pago || "No registrado"}</td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    console.error("Error cargando historial de parqueadero:", err);
+    empty.hidden = false;
+    empty.textContent = "Error cargando historial de parqueadero.";
   }
 }
 
@@ -921,7 +1212,7 @@ async function cargarOrdensTaller() {
           <td>${formatMoney(ord.total_general)}</td>
           <td><span class="badge">${ord.estado}</span></td>
           <td>
-            <button class="btn btn-sm btn-primary" onclick="completarOrdenTaller(${ord.id})">Completar</button>
+            <button class="btn btn-sm btn-primary" onclick="completarOrdenTaller(${ord.id})">Entregar y cobrar</button>
           </td>
         </tr>
       `).join("");
@@ -931,17 +1222,26 @@ async function cargarOrdensTaller() {
     // Tabla completados
     const tbodyCompletados = document.getElementById("tal-completados-tbody");
     const emptyCompletados = document.getElementById("tal-completados-empty");
+    const busquedaHistorial = document.getElementById("tal-historial-buscar")?.value.trim().toLowerCase() || "";
+    const completadosFiltrados = busquedaHistorial
+      ? completados.filter(o =>
+          `${o.placa || ""} ${o.empleado_nombre || ""} ${o.descripcion || ""}`
+            .toLowerCase()
+            .includes(busquedaHistorial)
+        )
+      : completados;
     if (tbodyCompletados) {
-      tbodyCompletados.innerHTML = completados.map(ord => `
+      tbodyCompletados.innerHTML = completadosFiltrados.map(ord => `
         <tr>
           <td>${ord.placa}</td>
           <td>${ord.descripcion}</td>
           <td>${ord.empleado_nombre || "Sin asignar"}</td>
           <td>${formatMoney(ord.total_general)}</td>
           <td>${new Date(ord.fecha_entrega).toLocaleDateString()}</td>
+          <td>${ord.metodo_pago || "No registrado"}</td>
         </tr>
       `).join("");
-      emptyCompletados.hidden = completados.length > 0;
+      emptyCompletados.hidden = completadosFiltrados.length > 0;
     }
   } catch (err) {
     console.error("Error cargando órdenes de taller:", err);
@@ -950,12 +1250,7 @@ async function cargarOrdensTaller() {
 
 async function completarOrdenTaller(id) {
   try {
-    await apiFetch(`/api/taller/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ estado: "Entregado" }),
-    });
-    cargarOrdensTaller();
-    showMessage("tal-msg", "Orden marcada como completada.");
+    await abrirModalCobroServicio("taller", id);
   } catch (err) {
     showMessage("tal-msg", err.message, true);
   }

@@ -15,8 +15,18 @@ router.use(auth);
  */
 function obtenerRangoFechas(query) {
   const hoy = new Date();
-  let desde = query.desde ? new Date(query.desde) : new Date(hoy);
-  let hasta = query.hasta ? new Date(query.hasta) : new Date(hoy);
+
+  const parseFechaLocal = value => {
+    if (!value) return new Date(hoy);
+    const match = String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return new Date(value);
+
+    const [, year, month, day] = match;
+    return new Date(Number(year), Number(month) - 1, Number(day));
+  };
+
+  let desde = parseFechaLocal(query.desde);
+  let hasta = parseFechaLocal(query.hasta);
 
   // Normalizar a inicio / fin de día
   desde.setHours(0, 0, 0, 0);

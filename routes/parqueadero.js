@@ -671,7 +671,7 @@ router.post("/salida/:id", auth, async (req, res) => {
     }
 
     // Validar que metodo_pago es requerido y válido
-    const metodos_validos = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "OTRO"];
+    const metodos_validos = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "OTRO"];
     if (!metodo_pago) {
       return res.status(400).json({ 
         error: "Debe especificar el método de pago (EFECTIVO, TARJETA, TRANSFERENCIA u OTRO)." 
@@ -827,6 +827,42 @@ router.get("/activo", auth, async (req, res) => {
   } catch (err) {
     console.error("Error obteniendo parqueadero activo:", err);
     res.status(500).json({ error: "Error interno del servidor." });
+  }
+});
+
+/**
+ * GET /api/parqueadero/historial
+ *
+ * Lista los últimos servicios cerrados del parqueadero.
+ */
+router.get("/historial", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+
+  try {
+    const { rows } = await db.query(
+      `SELECT
+         p.id,
+         p.placa,
+         p.tipo_vehiculo,
+         p.nombre_cliente,
+         p.hora_entrada,
+         p.hora_salida,
+         p.minutos_total,
+         p.valor_total,
+         p.metodo_pago
+       FROM parqueadero p
+       WHERE p.empresa_id = $1
+         AND p.hora_salida IS NOT NULL
+       ORDER BY p.hora_salida DESC
+       LIMIT $2`,
+      [empresa_id, limit]
+    );
+
+    res.json(rows);
+  } catch (err) {
+    console.error("Error obteniendo historial de parqueadero:", err);
+    res.status(500).json({ error: "Error obteniendo historial de parqueadero." });
   }
 });
 

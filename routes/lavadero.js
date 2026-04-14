@@ -5,6 +5,8 @@ const auth = require("../middleware/auth");
 
 const router = express.Router();
 
+const METODOS_PAGO_VALIDOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "OTRO"];
+
 /* =========================================================
  * TIPOS DE LAVADO
  * =======================================================*/
@@ -247,7 +249,7 @@ router.get("/", auth, async (req, res) => {
 router.patch("/:id", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { id } = req.params;
-  const { estado } = req.body || {};
+  const { estado, metodo_pago, detalle_pago } = req.body || {};
 
   const estadosValidos = ["Pendiente", "En_Proceso", "Completado"];
 
@@ -258,14 +260,36 @@ router.patch("/:id", auth, async (req, res) => {
     });
   }
 
+  if (estado === "Completado" && !metodo_pago) {
+    return res.status(400).json({
+      error: "Debe registrar el método de pago para completar el lavado.",
+    });
+  }
+
+  if (metodo_pago && !METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
+    return res.status(400).json({
+      error: `Método de pago inválido. Opciones válidas: ${METODOS_PAGO_VALIDOS.join(", ")}`,
+    });
+  }
+
   try {
+    const detalleStr =
+      detalle_pago !== undefined && detalle_pago !== null
+        ? JSON.stringify(detalle_pago)
+        : null;
+
     const { rows } = await db.query(
       `UPDATE lavadero
-       SET estado = $1,
-           hora_fin = CASE WHEN $1 = 'Completado' THEN NOW() ELSE hora_fin END
-       WHERE empresa_id = $2 AND id = $3
+       SET estado = $1::varchar,
+           hora_fin = CASE
+             WHEN $1::text = 'Completado' THEN COALESCE(hora_fin, NOW())
+             ELSE hora_fin
+           END,
+           metodo_pago = COALESCE($2::varchar, metodo_pago),
+           detalle_pago = COALESCE($3::jsonb, detalle_pago)
+       WHERE empresa_id = $4 AND id = $5
        RETURNING *`,
-      [estado, empresa_id, id]
+      [estado, metodo_pago || null, detalleStr, empresa_id, id]
     );
 
     if (rows.length === 0) {
@@ -362,6 +386,12 @@ router.post("/:id/pago", auth, async (req, res) => {
       .json({ error: "Debe enviar el campo metodo_pago." });
   }
 
+  if (!METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
+    return res.status(400).json({
+      error: `Método de pago inválido. Opciones válidas: ${METODOS_PAGO_VALIDOS.join(", ")}`,
+    });
+  }
+
   try {
     const detalleStr =
       detalle_pago !== undefined && detalle_pago !== null
@@ -456,7 +486,7 @@ router.get("/:id", auth, async (req, res) => {
          tl.nombre AS tipo_lavado_nombre,
          tl.descripcion AS tipo_lavado_descripcion,
          e.nombre AS lavador_nombre,
-         v.placa,
+         v.placa AS vehiculo_placa,
          v.marca,
          v.modelo,
          c.nombre AS cliente_nombre,

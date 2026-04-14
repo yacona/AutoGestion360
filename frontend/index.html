@@ -265,6 +265,31 @@
                 </div>
               </div>
             </div>
+
+            <div class="card card-expand">
+              <h3>Historial de servicios de parqueadero</h3>
+              <div class="search-bar">
+                <input type="text" id="pq-historial-buscar" placeholder="Buscar por placa, cliente o tipo..." />
+              </div>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Placa</th>
+                      <th>Tipo</th>
+                      <th>Cliente</th>
+                      <th>Entrada</th>
+                      <th>Salida</th>
+                      <th>Tiempo</th>
+                      <th>Valor</th>
+                      <th>Pago</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pq-historial-tbody"></tbody>
+                </table>
+                <div id="pq-historial-empty" class="table-empty">No hay servicios cerrados en parqueadero.</div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -332,7 +357,10 @@
 
             <!-- Historial completado -->
             <div class="card card-expand">
-              <h3>Órdenes completadas hoy</h3>
+              <h3>Historial de lavados completados</h3>
+              <div class="search-bar">
+                <input type="text" id="lav-historial-buscar" placeholder="Buscar por placa o lavador..." />
+              </div>
               <div class="table-wrapper">
                 <table class="table">
                   <thead>
@@ -347,7 +375,7 @@
                   </thead>
                   <tbody id="lav-completados-tbody"></tbody>
                 </table>
-                <div id="lav-completados-empty" class="table-empty">No hay órdenes completadas hoy.</div>
+                <div id="lav-completados-empty" class="table-empty">No hay lavados completados.</div>
               </div>
             </div>
           </div>
@@ -412,7 +440,10 @@
 
             <!-- Órdenes completadas -->
             <div class="card card-expand">
-              <h3>Órdenes completadas</h3>
+              <h3>Historial de órdenes de taller</h3>
+              <div class="search-bar">
+                <input type="text" id="tal-historial-buscar" placeholder="Buscar por placa o mecánico..." />
+              </div>
               <div class="table-wrapper">
                 <table class="table">
                   <thead>
@@ -422,6 +453,7 @@
                       <th>Mecánico</th>
                       <th>Valor</th>
                       <th>Fecha</th>
+                      <th>Pago</th>
                     </tr>
                   </thead>
                   <tbody id="tal-completados-tbody"></tbody>
@@ -825,6 +857,111 @@
     <div class="modal-footer">
       <button type="button" class="btn btn-secondary" onclick="cerrarModalSalida()">Cancelar</button>
       <button type="button" class="btn btn-primary btn-lg" onclick="confirmarSalida()">✓ Confirmar salida y pago</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal estándar de cobro para lavadero y taller -->
+<div id="modal-cobro-servicio" class="modal hidden">
+  <div class="modal-content modal-lg">
+    <div class="modal-header">
+      <h3 id="cobro-servicio-title">Confirmar servicio y registrar pago</h3>
+      <button type="button" class="modal-close" onclick="cerrarModalCobroServicio()">✕</button>
+    </div>
+
+    <div class="modal-body">
+      <div class="form-section">
+        <h4>Datos del servicio</h4>
+        <div class="info-grid">
+          <div>
+            <strong>Placa:</strong>
+            <span id="cobro-servicio-placa"></span>
+          </div>
+          <div>
+            <strong>Servicio:</strong>
+            <span id="cobro-servicio-tipo"></span>
+          </div>
+          <div>
+            <strong>Responsable:</strong>
+            <span id="cobro-servicio-responsable"></span>
+          </div>
+          <div>
+            <strong>Estado actual:</strong>
+            <span id="cobro-servicio-estado"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h4>Detalles</h4>
+        <div class="info-grid">
+          <div>
+            <strong>Cliente:</strong>
+            <span id="cobro-servicio-cliente"></span>
+          </div>
+          <div>
+            <strong>Inicio:</strong>
+            <span id="cobro-servicio-inicio"></span>
+          </div>
+          <div>
+            <strong>Finalización:</strong>
+            <span id="cobro-servicio-fin"></span>
+          </div>
+          <div>
+            <strong>Tiempo:</strong>
+            <span id="cobro-servicio-tiempo" class="time-highlight"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h4>Cálculo de pago</h4>
+        <div class="info-grid">
+          <div class="cost-highlight">
+            <strong>VALOR A COBRAR:</strong>
+            <span id="cobro-servicio-valor" class="money-big"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h4>Método de pago *</h4>
+        <div class="form-group">
+          <select id="cobro-metodo-pago" aria-label="Método de pago del servicio" title="Método de pago del servicio" required>
+            <option value="">-- Seleccione método de pago --</option>
+            <option value="EFECTIVO">💵 Efectivo</option>
+            <option value="TARJETA">💳 Tarjeta débito/crédito</option>
+            <option value="TRANSFERENCIA">📱 Transferencia bancaria</option>
+            <option value="MIXTO">💰 Pago mixto</option>
+            <option value="OTRO">❓ Otro método</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="cobro-referencia-group" hidden>
+          <label for="cobro-referencia">Referencia de transacción</label>
+          <input type="text" id="cobro-referencia"
+            placeholder="Ej: número de comprobante, voucher o transferencia" />
+        </div>
+
+        <div class="form-group" id="cobro-detalle-pago-group" hidden>
+          <label for="cobro-detalle-pago">Detalle adicional</label>
+          <textarea id="cobro-detalle-pago" rows="2"
+            placeholder="Ej: 20.000 efectivo + 25.000 transferencia, o notas sobre el pago"></textarea>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <h4>Observaciones (opcional)</h4>
+        <div class="form-group">
+          <textarea id="cobro-observaciones" rows="2"
+            placeholder="Ej: servicio entregado sin novedades"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="cerrarModalCobroServicio()">Cancelar</button>
+      <button type="button" class="btn btn-primary btn-lg" onclick="confirmarCobroServicio()">✓ Confirmar servicio y pago</button>
     </div>
   </div>
 </div>
