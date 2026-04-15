@@ -4,18 +4,76 @@ const router = express.Router();
 const db = require('../db');
 const authMiddleware = require('../middleware/auth');
 const { enviarNotificacionLicencia } = require('../utils/email');
+const { ensureLicenciasSchema } = require('../utils/licencias-schema');
 
-// Middleware para verificar si es admin (asumiendo que hay un rol 'admin')
-function adminOnly(req, res, next) {
-  if (req.user.rol !== 'admin') {
-    return res.status(403).json({ error: 'Acceso denegado. Solo administradores.' });
+function normalizeRole(role) {
+  return String(role || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+function superAdminOnly(req, res, next) {
+  if (normalizeRole(req.user.rol) !== 'superadmin') {
+    return res.status(403).json({ error: 'Acceso denegado. Solo SuperAdmin.' });
   }
   next();
 }
 
+async function getLicenciaConModulos(licenciaId) {
+  await ensureLicenciasSchema();
+  const { rows: licencias } = await db.query(
+    `SELECT id, nombre, descripcion, precio, creado_en
+     FROM licencias
+     WHERE id = $1`,
+    [licenciaId]
+  );
+
+  if (licencias.length === 0) return null;
+
+  const { rows: modulos } = await db.query(
+    `SELECT m.id, m.nombre, m.descripcion
+     FROM modulos m
+     JOIN licencia_modulo lm ON lm.modulo_id = m.id
+     WHERE lm.licencia_id = $1
+     ORDER BY m.nombre`,
+    [licenciaId]
+  );
+
+  return {
+    ...licencias[0],
+    modulos,
+  };
+}
+
+async function getLicenciasCatalogo() {
+  await ensureLicenciasSchema();
+  const { rows: licencias } = await db.query(
+    `SELECT id, nombre, descripcion, precio, creado_en
+     FROM licencias
+     ORDER BY precio NULLS LAST, nombre`
+  );
+
+  const { rows: modulos } = await db.query(
+    `SELECT lm.licencia_id, m.id, m.nombre, m.descripcion
+     FROM licencia_modulo lm
+     JOIN modulos m ON m.id = lm.modulo_id
+     ORDER BY m.nombre`
+  );
+
+  return licencias.map((licencia) => ({
+    ...licencia,
+    modulos: modulos
+      .filter((modulo) => Number(modulo.licencia_id) === Number(licencia.id))
+      .map(({ licencia_id, ...modulo }) => modulo),
+  }));
+}
+
 // Crear una nueva licencia
-router.post('/', authMiddleware, adminOnly, async (req, res) => {
+router.post('/', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const { nombre, descripcion, precio } = req.body;
 
     if (!nombre) {
@@ -41,8 +99,9 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Obtener todas las licencias
-router.get('/', authMiddleware, adminOnly, async (req, res) => {
+router.get('/', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const query = 'SELECT * FROM licencias ORDER BY creado_en DESC';
     const { rows } = await db.query(query);
     res.json(rows);
@@ -53,8 +112,9 @@ router.get('/', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Actualizar una licencia
-router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
+router.put('/:id', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const { id } = req.params;
     const { nombre, descripcion, precio } = req.body;
 
@@ -78,8 +138,9 @@ router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Asignar módulos a una licencia
-router.post('/:id/modulos', authMiddleware, adminOnly, async (req, res) => {
+router.post('/:id/modulos', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const { id } = req.params;
     const { modulos } = req.body; // Array de modulo_ids
 
@@ -90,10 +151,14 @@ router.post('/:id/modulos', authMiddleware, adminOnly, async (req, res) => {
     // Primero, eliminar módulos existentes
     await db.query('DELETE FROM licencia_modulo WHERE licencia_id = $1', [id]);
 
-    // Insertar nuevos módulos
-    const values = modulos.map(moduloId => `(${id}, ${moduloId})`).join(', ');
-    if (values) {
-      await db.query(`INSERT INTO licencia_modulo (licencia_id, modulo_id) VALUES ${values}`);
+    if (modulos.length > 0) {
+      const values = modulos
+        .map((_, index) => `($1, $${index + 2})`)
+        .join(', ');
+      await db.query(
+        `INSERT INTO licencia_modulo (licencia_id, modulo_id) VALUES ${values}`,
+        [id, ...modulos]
+      );
     }
 
     res.json({ mensaje: 'Módulos asignados exitosamente' });
@@ -104,8 +169,9 @@ router.post('/:id/modulos', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Obtener módulos de una licencia
-router.get('/:id/modulos', authMiddleware, adminOnly, async (req, res) => {
+router.get('/:id/modulos', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const { id } = req.params;
     const query = `
       SELECT m.* FROM modulos m
@@ -121,26 +187,112 @@ router.get('/:id/modulos', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Asignar licencia a una empresa
-router.post('/asignar', authMiddleware, adminOnly, async (req, res) => {
+router.get('/catalogo/completo', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
+    const [licencias, modulosResult] = await Promise.all([
+      getLicenciasCatalogo(),
+      db.query('SELECT * FROM modulos ORDER BY nombre'),
+    ]);
+
+    res.json({
+      licencias,
+      modulos: modulosResult.rows,
+    });
+  } catch (error) {
+    console.error('Error obteniendo catalogo de licencias:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+router.get('/empresa/:empresaId', authMiddleware, superAdminOnly, async (req, res) => {
+  try {
+    await ensureLicenciasSchema();
+    const { empresaId } = req.params;
+    const query = `
+      SELECT el.*, e.nombre as empresa_nombre, l.nombre as licencia_nombre, l.descripcion, l.precio
+      FROM empresa_licencia el
+      JOIN empresas e ON el.empresa_id = e.id
+      JOIN licencias l ON el.licencia_id = l.id
+      WHERE el.empresa_id = $1 AND el.activa = true
+      ORDER BY el.creado_en DESC
+      LIMIT 1
+    `;
+    const { rows } = await db.query(query, [empresaId]);
+
+    if (rows.length === 0) {
+      return res.json({ mensaje: 'No hay licencia asignada' });
+    }
+
+    const licencia = await getLicenciaConModulos(rows[0].licencia_id);
+
+    res.json({
+      ...rows[0],
+      modulos: licencia?.modulos || [],
+    });
+  } catch (error) {
+    console.error('Error obteniendo licencia de empresa:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+router.post('/asignar', authMiddleware, superAdminOnly, async (req, res) => {
+  try {
+    await ensureLicenciasSchema();
     const { empresa_id, licencia_id, fecha_inicio, fecha_fin } = req.body;
 
     if (!empresa_id || !licencia_id) {
       return res.status(400).json({ error: 'empresa_id y licencia_id son requeridos' });
     }
 
-    // Desactivar licencia anterior si existe
-    await db.query('UPDATE empresa_licencia SET activa = false WHERE empresa_id = $1', [empresa_id]);
+    const licencia = await getLicenciaConModulos(licencia_id);
+    if (!licencia) {
+      return res.status(404).json({ error: 'Licencia no encontrada' });
+    }
 
-    // Insertar nueva asignación
-    const query = `
-      INSERT INTO empresa_licencia (empresa_id, licencia_id, fecha_inicio, fecha_fin)
-      VALUES ($1, $2, $3, $4)
-      RETURNING *
-    `;
-    const { rows } = await db.query(query, [empresa_id, licencia_id, fecha_inicio, fecha_fin]);
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
 
-    res.status(201).json({ mensaje: 'Licencia asignada exitosamente', asignacion: rows[0] });
+      await client.query('UPDATE empresa_licencia SET activa = false WHERE empresa_id = $1', [empresa_id]);
+
+      const query = `
+        INSERT INTO empresa_licencia (empresa_id, licencia_id, fecha_inicio, fecha_fin, activa)
+        VALUES ($1, $2, COALESCE($3, NOW()), $4, true)
+        ON CONFLICT (empresa_id) DO UPDATE
+        SET licencia_id = EXCLUDED.licencia_id,
+            fecha_inicio = EXCLUDED.fecha_inicio,
+            fecha_fin = EXCLUDED.fecha_fin,
+            activa = true,
+            creado_en = NOW()
+        RETURNING *
+      `;
+      const { rows } = await client.query(query, [empresa_id, licencia_id, fecha_inicio || null, fecha_fin || null]);
+
+      await client.query(
+        `UPDATE empresas
+         SET licencia_tipo = $1,
+             licencia_id = $2,
+             licencia_inicio = COALESCE($3, NOW()),
+             licencia_fin = $4,
+             activa = true
+         WHERE id = $5`,
+        [licencia.nombre, licencia_id, fecha_inicio || null, fecha_fin || null, empresa_id]
+      );
+
+      await client.query('COMMIT');
+
+      res.status(201).json({
+        mensaje: 'Licencia asignada exitosamente',
+        asignacion: rows[0],
+        licencia,
+      });
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     console.error('Error asignando licencia:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
@@ -148,8 +300,9 @@ router.post('/asignar', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Obtener todas las asignaciones de licencias
-router.get('/asignaciones', authMiddleware, adminOnly, async (req, res) => {
+router.get('/asignaciones', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const query = `
       SELECT el.*, e.nombre as empresa_nombre, l.nombre as licencia_nombre
       FROM empresa_licencia el
@@ -166,8 +319,9 @@ router.get('/asignaciones', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Obtener módulos disponibles
-router.get('/modulos/disponibles', authMiddleware, adminOnly, async (req, res) => {
+router.get('/modulos/disponibles', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const query = 'SELECT * FROM modulos ORDER BY nombre';
     const { rows } = await db.query(query);
     res.json(rows);
@@ -178,8 +332,9 @@ router.get('/modulos/disponibles', authMiddleware, adminOnly, async (req, res) =
 });
 
 // Obtener licencias próximas a vencer (para notificaciones)
-router.get('/proximas-vencer', authMiddleware, adminOnly, async (req, res) => {
+router.get('/proximas-vencer', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const dias = parseInt(req.query.dias) || 30; // Días por defecto
     const fechaLimite = new Date();
     fechaLimite.setDate(fechaLimite.getDate() + dias);
@@ -201,8 +356,9 @@ router.get('/proximas-vencer', authMiddleware, adminOnly, async (req, res) => {
 });
 
 // Enviar notificaciones de licencias próximas a vencer
-router.post('/enviar-notificaciones', authMiddleware, adminOnly, async (req, res) => {
+router.post('/enviar-notificaciones', authMiddleware, superAdminOnly, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const dias = parseInt(req.query.dias) || 30;
     const fechaLimite = new Date();
     fechaLimite.setDate(fechaLimite.getDate() + dias);

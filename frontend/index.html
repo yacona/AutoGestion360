@@ -64,28 +64,37 @@
         </div>
 
         <nav class="sidebar-nav">
-          <button class="nav-link active" data-view="dashboard">
+          <button class="nav-link active" data-view="dashboard" data-license-module="dashboard">
             🧭 Dashboard
           </button>
-          <button class="nav-link" data-view="parqueadero">
+          <button class="nav-link" data-view="modulos">
+            🧩 Módulos
+          </button>
+          <button class="nav-link" data-view="empresas" data-license-module="empresas" data-superadmin-only>
+            🏢 Empresas
+          </button>
+          <button class="nav-link" data-view="parqueadero" data-license-module="parqueadero">
             🅿 Parqueadero
           </button>
-          <button class="nav-link" data-view="lavadero">
+          <button class="nav-link" data-view="lavadero" data-license-module="lavadero">
             🚿 Lavadero
           </button>
-          <button class="nav-link" data-view="taller">
+          <button class="nav-link" data-view="taller" data-license-module="taller">
             🔧 Taller
           </button>
-          <button class="nav-link" data-view="clientes">
+          <button class="nav-link" data-view="clientes" data-license-module="clientes">
             👥 Clientes
           </button>
-          <button class="nav-link" data-view="empleados">
+          <button class="nav-link" data-view="usuarios" data-license-module="usuarios" data-useradmin-only>
+            🔐 Usuarios
+          </button>
+          <button class="nav-link" data-view="empleados" data-license-module="empleados">
             🧑‍🔧 Empleados
           </button>
-          <button class="nav-link" data-view="reportes">
+          <button class="nav-link" data-view="reportes" data-license-module="reportes">
             📊 Reportes
           </button>
-          <button class="nav-link" data-view="config">
+          <button class="nav-link" data-view="config" data-license-module="configuracion">
             ⚙ Configuración
           </button>
         </nav>
@@ -215,6 +224,277 @@
                 </svg>
                 <div id="dash-chart" class="chart-bars"></div>
               </div>
+            </div>
+
+            <div class="dashboard-panel dashboard-alerts-panel">
+              <div class="panel-heading alert-panel-heading">
+                <div>
+                  <h3>Alertas inteligentes</h3>
+                  <p class="small-text">Vencimientos, cartera y operaciones que necesitan atención.</p>
+                </div>
+                <div class="alert-panel-actions">
+                  <span id="dash-alertas-count" class="badge badge-muted">0 alertas</span>
+                  <span id="dash-alertas-critical" class="badge badge-success">Sin críticas</span>
+                  <button type="button" id="btn-refresh-alertas" class="btn btn-secondary btn-sm">Actualizar</button>
+                </div>
+              </div>
+
+              <div class="alert-summary-grid">
+                <div class="alert-summary-item">
+                  <span>Licencia</span>
+                  <strong id="dash-alert-license">Sin vencimiento</strong>
+                  <small id="dash-alert-license-note">Plan actual</small>
+                </div>
+                <div class="alert-summary-item">
+                  <span>Mensualidades</span>
+                  <strong id="dash-alert-monthly">0 vencidas</strong>
+                  <small id="dash-alert-monthly-note">0 próximas</small>
+                </div>
+                <div class="alert-summary-item">
+                  <span>Cartera</span>
+                  <strong id="dash-alert-debt">$ 0</strong>
+                  <small id="dash-alert-debt-note">0 servicios pendientes</small>
+                </div>
+                <div class="alert-summary-item">
+                  <span>Operación</span>
+                  <strong id="dash-alert-open">0 abiertas</strong>
+                  <small id="dash-alert-open-note">0 demoradas</small>
+                </div>
+              </div>
+
+              <div id="dash-alertas-list" class="smart-alert-list"></div>
+              <div id="dash-alertas-empty" class="table-empty">Operación al día. Sin alertas prioritarias.</div>
+              <div id="dash-alertas-updated" class="alert-updated-note">Sin actualizar</div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-modulos" class="view">
+          <div class="module-catalog">
+            <div class="module-catalog-header">
+              <div>
+                <span class="eyebrow">Mapa del sistema</span>
+                <h3>Centro de módulos</h3>
+              </div>
+              <p>
+                Operación diaria, administración y crecimiento conectados en un solo panel.
+              </p>
+            </div>
+
+            <div class="module-catalog-grid">
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="parqueadero" data-license-module="parqueadero" data-parking-flow="ocasional">
+                <div class="module-preview preview-pos" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-form">
+                    <strong>Ingresar vehículo</strong>
+                    <div></div>
+                    <div></div>
+                    <em></em>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>💰</span>Punto de Venta (POS)</h3>
+                  <span class="module-pill pill-operaciones">operaciones</span>
+                  <p>Sistema de punto de venta integrado para registro rápido de vehículos y gestión de ingresos en tiempo real.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="parqueadero" data-license-module="parqueadero">
+                <div class="module-preview preview-vehicles" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-sidebar"></div>
+                  <div class="preview-table">
+                    <strong>Vehículos parqueados</strong>
+                    <i></i><i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>🚗</span>Gestión de Vehículos</h3>
+                  <span class="module-pill pill-operaciones">operaciones</span>
+                  <p>Control completo del inventario de vehículos dentro del parqueadero con seguimiento en tiempo real.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="clientes" data-license-module="clientes">
+                <div class="module-preview preview-clients" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-sidebar"></div>
+                  <div class="preview-table">
+                    <strong>Clientes</strong>
+                    <i></i><i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>👥</span>Gestión de Clientes</h3>
+                  <span class="module-pill pill-admin">administración</span>
+                  <p>Administración completa de clientes con planes, historial y gestión de pagos recurrentes.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="reportes" data-license-module="reportes">
+                <div class="module-preview preview-sales" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-kpis">
+                    <b></b><b></b><b></b>
+                  </div>
+                  <div class="preview-bars">
+                    <i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>📈</span>Transacciones Cerradas</h3>
+                  <span class="module-pill pill-operaciones">operaciones</span>
+                  <p>Consulta rápida de ventas cerradas, métodos de pago, responsables e ingresos por periodo.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="usuarios" data-license-module="usuarios" data-useradmin-only>
+                <div class="module-preview preview-users" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-sidebar"></div>
+                  <div class="preview-table">
+                    <strong>Usuarios</strong>
+                    <i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>👤</span>Usuarios</h3>
+                  <span class="module-pill pill-admin">administración</span>
+                  <p>Gestión de usuarios de acceso, roles, permisos y estado dentro de cada empresa.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-soon" aria-label="Sistema de roles, módulo próximo">
+                <div class="module-preview preview-roles" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-modal">
+                    <strong>Nuevo rol</strong>
+                    <i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>🔐</span>Sistema de Roles</h3>
+                  <span class="module-pill pill-admin">administración</span>
+                  <p>Sistema flexible de roles que se adapta a la necesidad de cada organización.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="empresas" data-license-module="empresas" data-superadmin-only>
+                <div class="module-preview preview-companies" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-sidebar"></div>
+                  <div class="preview-table">
+                    <strong>Empresas</strong>
+                    <i></i><i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>🏢</span>Gestión Multi-Empresa</h3>
+                  <span class="module-pill pill-admin">administración</span>
+                  <p>Control centralizado para administrar múltiples empresas desde una sola plataforma.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="config" data-license-module="configuracion" data-open-config-tab="empresa">
+                <div class="module-preview preview-company" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-company-card">
+                    <b></b>
+                    <i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>🏦</span>Mi Empresa</h3>
+                  <span class="module-pill pill-admin">administración</span>
+                  <p>Panel de control administrativo para la gestión completa de tu empresa.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-soon" aria-label="Gestión multi-país, módulo próximo">
+                <div class="module-preview preview-country" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-sidebar"></div>
+                  <div class="preview-table">
+                    <strong>Países</strong>
+                    <i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>🌎</span>Gestión Multi-País</h3>
+                  <span class="module-pill pill-expansion">expansión</span>
+                  <p>Sistema global para administrar operaciones en múltiples países con configuración local.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="lavadero" data-license-module="lavadero">
+                <div class="module-preview preview-services" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-service-list">
+                    <i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>🛍️</span>Servicios Adicionales</h3>
+                  <span class="module-pill pill-operaciones">operaciones</span>
+                  <p>Venta de servicios adicionales y productos complementarios para maximizar ingresos.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-enabled" role="button" tabindex="0" data-open-view="config" data-license-module="configuracion" data-open-config-tab="parqueadero">
+                <div class="module-preview preview-rates" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-sidebar"></div>
+                  <div class="preview-table">
+                    <strong>Tarifas</strong>
+                    <i></i><i></i><i></i><i></i>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>⏱</span>Gestión de Tarifas</h3>
+                  <span class="module-pill pill-admin">administración</span>
+                  <p>Configuración flexible de tarifas con múltiples esquemas de precios.</p>
+                </div>
+              </article>
+
+              <article class="module-tile module-tile-soon" aria-label="Conexión de empresas, módulo próximo">
+                <div class="module-preview preview-links" aria-hidden="true">
+                  <div class="preview-window">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div class="preview-connection">
+                    <b></b>
+                    <i></i>
+                    <b></b>
+                  </div>
+                </div>
+                <div class="module-copy">
+                  <h3><span>🔗</span>Conexión de Empresas</h3>
+                  <span class="module-pill pill-integration">integración</span>
+                  <p>Sistema de integración entre empresas para servicios compartidos y colaboración.</p>
+                </div>
+              </article>
             </div>
           </div>
         </section>
@@ -693,12 +973,42 @@
 
         <!-- MÓDULO CLIENTES -->
         <section id="view-clientes" class="view">
-          <div class="cards-grid">
-            <!-- Nuevo cliente -->
-            <div class="card card-full">
-              <h3>Registrar nuevo cliente</h3>
-              <form id="form-cliente-nuevo">
-                <div class="form-row">
+          <div class="clients-shell">
+            <div class="card clients-hero-card">
+              <div>
+                <span class="badge badge-info">Clientes 360</span>
+                <h3>Relación completa con cada cliente</h3>
+                <p>Consulta historial, vehículos, mensualidades y valor generado desde una sola vista.</p>
+              </div>
+              <div class="client-summary-grid">
+                <div>
+                  <span>Clientes</span>
+                  <strong id="cli-total-clientes">0</strong>
+                </div>
+                <div>
+                  <span>Servicios</span>
+                  <strong id="cli-total-servicios">0</strong>
+                </div>
+                <div>
+                  <span>Ingresos</span>
+                  <strong id="cli-total-ingresos">$0</strong>
+                </div>
+                <div>
+                  <span>Ticket prom.</span>
+                  <strong id="cli-ticket-promedio">$0</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="clients-layout">
+              <div class="card client-form-card">
+                <div class="form-card-heading">
+                  <div>
+                    <span class="badge badge-muted">Nuevo</span>
+                    <h3>Registrar cliente</h3>
+                  </div>
+                </div>
+                <form id="form-cliente-nuevo">
                   <div class="form-group">
                     <label for="cli-nombre">Nombre *</label>
                     <input type="text" id="cli-nombre" placeholder="Juan Pérez" required />
@@ -707,8 +1017,6 @@
                     <label for="cli-documento">Documento (cédula/NIT)</label>
                     <input type="text" id="cli-documento" placeholder="1234567890" />
                   </div>
-                </div>
-                <div class="form-row">
                   <div class="form-group">
                     <label for="cli-telefono">Teléfono</label>
                     <input type="tel" id="cli-telefono" placeholder="3001234567" />
@@ -717,34 +1025,475 @@
                     <label for="cli-email">Email</label>
                     <input type="email" id="cli-email" placeholder="juan@example.com" />
                   </div>
+                  <button type="submit" class="btn btn-primary">Registrar cliente</button>
+                  <div id="cli-msg" class="small-message" hidden></div>
+                </form>
+              </div>
+
+              <div class="card clients-list-card">
+                <div class="list-heading">
+                  <div>
+                    <h3>Clientes registrados</h3>
+                    <p class="small-text">Ordenados por actividad reciente.</p>
+                  </div>
+                  <span id="cli-lista-count" class="badge badge-muted">0 clientes</span>
                 </div>
-                <button type="submit" class="btn btn-primary">Registrar cliente</button>
-                <div id="cli-msg" class="small-message" hidden></div>
-              </form>
+                <div class="search-bar">
+                  <input type="text" id="cli-buscar" placeholder="Buscar por nombre, documento, teléfono o correo..." />
+                </div>
+                <div class="table-wrapper">
+                  <table class="table clients-table">
+                    <thead>
+                      <tr>
+                        <th>Cliente</th>
+                        <th>Contacto</th>
+                        <th>Servicios</th>
+                        <th>Total</th>
+                        <th>Última actividad</th>
+                        <th>Estado</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="cli-lista-tbody"></tbody>
+                  </table>
+                  <div id="cli-lista-empty" class="table-empty">No hay clientes registrados.</div>
+                </div>
+              </div>
             </div>
 
-            <!-- Lista de clientes -->
-            <div class="card card-expand">
-              <h3>Clientes registrados</h3>
-              <div class="search-bar">
-                <input type="text" id="cli-buscar" placeholder="Buscar por nombre o documento..." />
+            <div id="cli-perfil-panel" class="card client-profile-panel" hidden>
+              <div class="client-profile-header">
+                <div class="client-avatar" id="cli-perfil-iniciales">--</div>
+                <div>
+                  <span id="cli-perfil-badge" class="badge badge-muted">Perfil</span>
+                  <h3 id="cli-perfil-nombre">Selecciona un cliente</h3>
+                  <p id="cli-perfil-contacto" class="small-text">Sin contacto registrado</p>
+                </div>
+                <div class="client-profile-actions">
+                  <button type="button" id="cli-action-editar" class="btn btn-sm btn-secondary">Editar cliente</button>
+                  <button type="button" id="cli-action-vehiculo" class="btn btn-sm btn-secondary">Agregar vehículo</button>
+                  <button type="button" id="cli-action-mensualidad" class="btn btn-sm btn-primary">Crear mensualidad</button>
+                  <button type="button" id="cli-perfil-close" class="btn btn-sm btn-secondary">Cerrar</button>
+                </div>
               </div>
-              <div class="table-wrapper">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Nombre</th>
-                      <th>Documento</th>
-                      <th>Teléfono</th>
-                      <th>Email</th>
-                      <th>Servicios</th>
-                      <th>Registrado</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody id="cli-lista-tbody"></tbody>
-                </table>
-                <div id="cli-lista-empty" class="table-empty">No hay clientes registrados.</div>
+
+              <div class="client-action-panels">
+                <form id="form-cli-editar" class="client-action-panel" hidden>
+                  <div class="client-action-heading">
+                    <div>
+                      <h3>Editar cliente</h3>
+                      <p class="small-text">Datos básicos del perfil seleccionado.</p>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-secondary" data-cli-action-cancel>Cerrar</button>
+                  </div>
+                  <div class="client-action-grid">
+                    <div class="form-group">
+                      <label for="cli-edit-nombre">Nombre *</label>
+                      <input type="text" id="cli-edit-nombre" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-edit-documento">Documento</label>
+                      <input type="text" id="cli-edit-documento" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-edit-telefono">Teléfono</label>
+                      <input type="tel" id="cli-edit-telefono" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-edit-correo">Email</label>
+                      <input type="email" id="cli-edit-correo" />
+                    </div>
+                  </div>
+                  <button type="submit" class="btn btn-primary">Guardar cambios</button>
+                </form>
+
+                <form id="form-cli-vehiculo" class="client-action-panel" hidden>
+                  <div class="client-action-heading">
+                    <div>
+                      <h3>Agregar vehículo</h3>
+                      <p class="small-text">Asocia una nueva placa al cliente.</p>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-secondary" data-cli-action-cancel>Cerrar</button>
+                  </div>
+                  <div class="client-action-grid">
+                    <div class="form-group">
+                      <label for="cli-veh-placa">Placa *</label>
+                      <input type="text" id="cli-veh-placa" placeholder="ABC123" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-veh-tipo">Tipo *</label>
+                      <select id="cli-veh-tipo" required>
+                        <option value="CARRO">Carro</option>
+                        <option value="MOTO">Moto</option>
+                        <option value="CAMIONETA">Camioneta</option>
+                        <option value="BICICLETA">Bicicleta</option>
+                        <option value="OTRO">Otro</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-veh-marca">Marca</label>
+                      <input type="text" id="cli-veh-marca" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-veh-modelo">Modelo</label>
+                      <input type="text" id="cli-veh-modelo" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-veh-color">Color</label>
+                      <input type="text" id="cli-veh-color" />
+                    </div>
+                  </div>
+                  <button type="submit" class="btn btn-primary">Agregar vehículo</button>
+                </form>
+
+                <form id="form-cli-mensualidad" class="client-action-panel" hidden>
+                  <div class="client-action-heading">
+                    <div>
+                      <h3>Crear mensualidad</h3>
+                      <p class="small-text">Vincula una placa con vigencia y valor mensual.</p>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-secondary" data-cli-action-cancel>Cerrar</button>
+                  </div>
+                  <div class="client-action-grid">
+                    <div class="form-group">
+                      <label for="cli-men-vehiculo">Vehículo asociado</label>
+                      <select id="cli-men-vehiculo">
+                        <option value="">Ingresar placa manualmente</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-documento">Documento *</label>
+                      <input type="text" id="cli-men-documento" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-placa">Placa *</label>
+                      <input type="text" id="cli-men-placa" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-tipo">Tipo *</label>
+                      <select id="cli-men-tipo" required>
+                        <option value="CARRO">Carro</option>
+                        <option value="MOTO">Moto</option>
+                        <option value="CAMIONETA">Camioneta</option>
+                        <option value="BICICLETA">Bicicleta</option>
+                        <option value="OTRO">Otro</option>
+                      </select>
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-inicio">Inicio *</label>
+                      <input type="date" id="cli-men-inicio" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-fin">Fin *</label>
+                      <input type="date" id="cli-men-fin" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-valor">Valor mensual</label>
+                      <input type="number" id="cli-men-valor" min="0" step="100" placeholder="0" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-direccion">Dirección</label>
+                      <input type="text" id="cli-men-direccion" />
+                    </div>
+                    <div class="form-group">
+                      <label for="cli-men-contacto">Contacto emergencia</label>
+                      <input type="text" id="cli-men-contacto" />
+                    </div>
+                    <div class="form-group form-group-wide">
+                      <label for="cli-men-obs">Observaciones</label>
+                      <textarea id="cli-men-obs" rows="2"></textarea>
+                    </div>
+                  </div>
+                  <button type="submit" class="btn btn-primary">Crear mensualidad</button>
+                </form>
+
+                <div id="cli-action-msg" class="small-message" hidden></div>
+              </div>
+
+              <div class="client-metrics-grid">
+                <div class="client-metric">
+                  <span>Total gastado</span>
+                  <strong id="cli-perfil-total">$0</strong>
+                </div>
+                <div class="client-metric">
+                  <span>Servicios</span>
+                  <strong id="cli-perfil-servicios">0</strong>
+                </div>
+                <div class="client-metric">
+                  <span>Vehículos</span>
+                  <strong id="cli-perfil-vehiculos">0</strong>
+                </div>
+                <div class="client-metric">
+                  <span>Última visita</span>
+                  <strong id="cli-perfil-ultima">Sin actividad</strong>
+                </div>
+              </div>
+
+              <div class="client-breakdown-grid">
+                <div>
+                  <span>Parqueadero</span>
+                  <strong id="cli-perfil-parqueadero">$0</strong>
+                  <small id="cli-perfil-parqueadero-count">0 servicios</small>
+                </div>
+                <div>
+                  <span>Lavadero</span>
+                  <strong id="cli-perfil-lavadero">$0</strong>
+                  <small id="cli-perfil-lavadero-count">0 servicios</small>
+                </div>
+                <div>
+                  <span>Taller</span>
+                  <strong id="cli-perfil-taller">$0</strong>
+                  <small id="cli-perfil-taller-count">0 servicios</small>
+                </div>
+                <div>
+                  <span>Mensualidades</span>
+                  <strong id="cli-perfil-mensualidades">0 activas</strong>
+                  <small id="cli-perfil-mensualidades-count">0 registradas</small>
+                </div>
+              </div>
+
+              <div class="client-wallet-panel">
+                <div class="list-heading">
+                  <div>
+                    <h3>Pagos y cartera</h3>
+                    <p class="small-text">Estado de cobro consolidado del cliente.</p>
+                  </div>
+                  <div class="wallet-actions">
+                    <span id="cli-cartera-status" class="badge badge-muted">Cargando</span>
+                    <button type="button" id="cli-recibo-cliente" class="btn btn-sm btn-secondary">Estado de cuenta</button>
+                  </div>
+                </div>
+                <div class="wallet-summary-grid">
+                  <div>
+                    <span>Facturado</span>
+                    <strong id="cli-cartera-facturado">$0</strong>
+                  </div>
+                  <div>
+                    <span>Pagado</span>
+                    <strong id="cli-cartera-pagado">$0</strong>
+                  </div>
+                  <div>
+                    <span>Pendiente</span>
+                    <strong id="cli-cartera-pendiente">$0</strong>
+                  </div>
+                  <div>
+                    <span>Recurrente mensual</span>
+                    <strong id="cli-cartera-recurrente">$0</strong>
+                  </div>
+                </div>
+                <div class="wallet-detail-grid">
+                  <div>
+                    <h3>Servicios pendientes</h3>
+                    <div class="table-wrapper compact-table-wrapper">
+                      <table class="table wallet-table">
+                        <thead>
+                          <tr>
+                            <th>Fecha</th>
+                            <th>Módulo</th>
+                            <th>Placa</th>
+                            <th>Valor</th>
+                            <th>Estado</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody id="cli-cartera-pendientes-tbody"></tbody>
+                      </table>
+                      <div id="cli-cartera-pendientes-empty" class="table-empty">Sin servicios pendientes.</div>
+                    </div>
+                  </div>
+                  <div>
+                    <h3>Pagos recientes</h3>
+                    <div class="table-wrapper compact-table-wrapper">
+                      <table class="table wallet-table">
+                        <thead>
+                          <tr>
+                            <th>Fecha</th>
+                            <th>Módulo</th>
+                            <th>Placa</th>
+                            <th>Valor</th>
+                            <th>Método</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody id="cli-cartera-pagos-tbody"></tbody>
+                      </table>
+                      <div id="cli-cartera-pagos-empty" class="table-empty">Sin pagos registrados.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="client-profile-grid">
+                <div>
+                  <div class="list-heading">
+                    <div>
+                      <h3>Vehículos</h3>
+                      <p class="small-text">Placas asociadas al cliente.</p>
+                    </div>
+                  </div>
+                  <div id="cli-vehiculos-grid" class="client-vehicles-grid"></div>
+                  <div id="cli-vehiculos-empty" class="table-empty">Sin vehículos asociados.</div>
+                </div>
+
+                <div>
+                  <div class="list-heading">
+                    <div>
+                      <h3>Mensualidades</h3>
+                      <p class="small-text">Planes de parqueadero vinculados.</p>
+                    </div>
+                  </div>
+                  <div class="table-wrapper compact-table-wrapper">
+                    <table class="table compact-table">
+                      <thead>
+                        <tr>
+                          <th>Placa</th>
+                          <th>Vigencia</th>
+                          <th>Valor</th>
+                          <th>Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody id="cli-mensualidades-tbody"></tbody>
+                    </table>
+                    <div id="cli-mensualidades-empty" class="table-empty">Sin mensualidades registradas.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div id="vehiculo-360-panel" class="vehicle-360-panel" hidden>
+                <div class="vehicle-360-header">
+                  <div class="vehicle-plate-card">
+                    <span id="veh360-placa">---</span>
+                    <small id="veh360-tipo">Vehículo</small>
+                  </div>
+                  <div>
+                    <span id="veh360-estado" class="badge badge-muted">Sin registro</span>
+                    <h3>Vehículo 360</h3>
+                    <p id="veh360-detalle" class="small-text">Selecciona una placa para consultar el perfil completo.</p>
+                  </div>
+                  <div class="vehicle-360-actions">
+                    <button type="button" id="veh360-action-parqueadero" class="btn btn-sm btn-secondary">Registrar ingreso</button>
+                    <button type="button" id="veh360-action-lavadero" class="btn btn-sm btn-secondary">Nuevo lavado</button>
+                    <button type="button" id="veh360-action-taller" class="btn btn-sm btn-secondary">Orden taller</button>
+                    <button type="button" id="veh360-action-mensualidad" class="btn btn-sm btn-primary">Mensualidad</button>
+                    <button type="button" id="veh360-action-recibo" class="btn btn-sm btn-secondary">Comprobante</button>
+                    <button type="button" id="veh360-close" class="btn btn-sm btn-secondary">Cerrar</button>
+                  </div>
+                </div>
+
+                <div class="vehicle-360-grid">
+                  <div class="vehicle-360-stat">
+                    <span>Total gastado</span>
+                    <strong id="veh360-total">$0</strong>
+                  </div>
+                  <div class="vehicle-360-stat">
+                    <span>Servicios</span>
+                    <strong id="veh360-servicios">0</strong>
+                  </div>
+                  <div class="vehicle-360-stat">
+                    <span>Última actividad</span>
+                    <strong id="veh360-ultima">Sin actividad</strong>
+                  </div>
+                  <div class="vehicle-360-stat">
+                    <span>Mensualidad</span>
+                    <strong id="veh360-mensualidad">Sin plan</strong>
+                  </div>
+                </div>
+
+                <div class="vehicle-wallet-strip">
+                  <div>
+                    <span>Pagado</span>
+                    <strong id="veh360-pagado">$0</strong>
+                  </div>
+                  <div>
+                    <span>Pendiente</span>
+                    <strong id="veh360-pendiente">$0</strong>
+                  </div>
+                  <div>
+                    <span>En curso</span>
+                    <strong id="veh360-en-curso">$0</strong>
+                  </div>
+                  <div>
+                    <span>Recurrente mensual</span>
+                    <strong id="veh360-recurrente">$0</strong>
+                  </div>
+                </div>
+
+                <div class="vehicle-360-content">
+                  <div>
+                    <div class="vehicle-owner-box">
+                      <span>Propietario</span>
+                      <strong id="veh360-propietario">Sin propietario</strong>
+                      <small id="veh360-contacto">Sin contacto registrado</small>
+                    </div>
+                    <div class="vehicle-module-breakdown">
+                      <div>
+                        <span>Parqueadero</span>
+                        <strong id="veh360-parqueadero">$0</strong>
+                        <small id="veh360-parqueadero-count">0 servicios</small>
+                      </div>
+                      <div>
+                        <span>Lavadero</span>
+                        <strong id="veh360-lavadero">$0</strong>
+                        <small id="veh360-lavadero-count">0 servicios</small>
+                      </div>
+                      <div>
+                        <span>Taller</span>
+                        <strong id="veh360-taller">$0</strong>
+                        <small id="veh360-taller-count">0 servicios</small>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div class="list-heading">
+                      <div>
+                        <h3>Historial de la placa</h3>
+                        <p class="small-text">Movimientos recientes por módulo.</p>
+                      </div>
+                    </div>
+                    <div class="table-wrapper compact-table-wrapper">
+                      <table class="table vehicle-history-table">
+                        <thead>
+                          <tr>
+                            <th>Fecha</th>
+                            <th>Módulo</th>
+                            <th>Detalle</th>
+                            <th>Valor</th>
+                            <th>Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody id="veh360-historial-tbody"></tbody>
+                      </table>
+                      <div id="veh360-historial-empty" class="table-empty">Sin historial para esta placa.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="client-history-section">
+                <div class="list-heading">
+                  <div>
+                    <h3>Historial reciente</h3>
+                    <p class="small-text">Últimos movimientos de parqueadero, lavadero y taller.</p>
+                  </div>
+                </div>
+                <div class="table-wrapper">
+                  <table class="table clients-history-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Módulo</th>
+                        <th>Placa</th>
+                        <th>Detalle</th>
+                        <th>Valor</th>
+                        <th>Pago</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cli-historial-tbody"></tbody>
+                  </table>
+                  <div id="cli-historial-empty" class="table-empty">Sin historial reciente.</div>
+                </div>
               </div>
             </div>
           </div>
@@ -820,14 +1569,134 @@
           </div>
         </section>
 
+        <!-- MÓDULO USUARIOS DEL SISTEMA -->
+        <section id="view-usuarios" class="view">
+          <div class="cards-grid">
+            <div class="card card-full users-hero-card">
+              <div>
+                <span class="eyebrow">Accesos y permisos</span>
+                <h3>Usuarios del Sistema</h3>
+                <p class="small-text">Administra quién puede entrar al panel, su empresa, rol y estado.</p>
+              </div>
+              <div class="company-summary-grid">
+                <div>
+                  <span class="stat-label">Usuarios</span>
+                  <strong id="usuarios-total" class="stat-value">0</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Activos</span>
+                  <strong id="usuarios-activos" class="stat-value">0</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Administradores</span>
+                  <strong id="usuarios-admins" class="stat-value">0</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-full user-form-card">
+              <div class="form-card-heading">
+                <div>
+                  <h3 id="usuario-form-title">Crear usuario</h3>
+                  <p class="small-text">El correo debe ser único porque se usa para iniciar sesión.</p>
+                </div>
+                <button type="button" id="btn-usuario-cancelar-edicion" class="btn btn-secondary btn-sm hidden">Cancelar edición</button>
+              </div>
+
+              <form id="form-usuario-sistema">
+                <input type="hidden" id="usuario-id" />
+                <div class="form-row">
+                  <div class="form-group" data-superadmin-only>
+                    <label for="usuario-empresa">Empresa *</label>
+                    <select id="usuario-empresa"></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="usuario-nombre">Nombre *</label>
+                    <input type="text" id="usuario-nombre" required />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="usuario-email">Correo *</label>
+                    <input type="email" id="usuario-email" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="usuario-rol">Rol *</label>
+                    <select id="usuario-rol" required>
+                      <option value="Administrador">Administrador</option>
+                      <option value="Cajero">Cajero</option>
+                      <option value="Operador">Operador</option>
+                      <option value="Supervisor">Supervisor</option>
+                      <option value="SuperAdmin" data-superadmin-only>SuperAdmin</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="usuario-password">Contraseña</label>
+                    <input type="password" id="usuario-password" minlength="6" placeholder="Mínimo 6 caracteres" />
+                    <p id="usuario-password-help" class="small-text">Obligatoria al crear. En edición solo cambia si escribes una nueva.</p>
+                  </div>
+                  <div class="form-group">
+                    <label for="usuario-activo">Estado</label>
+                    <select id="usuario-activo">
+                      <option value="true">Activo</option>
+                      <option value="false">Inactivo</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" id="btn-usuario-submit" class="btn btn-primary">Crear usuario</button>
+                </div>
+                <div id="usuario-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <div class="card card-expand">
+              <div class="list-heading">
+                <h3>Usuarios registrados</h3>
+                <div class="search-bar inline-search">
+                  <input type="text" id="usuarios-buscar" placeholder="Buscar por nombre, correo, rol o empresa..." />
+                </div>
+              </div>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Usuario</th>
+                      <th>Empresa</th>
+                      <th>Rol</th>
+                      <th>Estado</th>
+                      <th>Creado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="usuarios-tbody"></tbody>
+                </table>
+                <div id="usuarios-empty" class="table-empty">No hay usuarios registrados.</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- MÓDULO REPORTES -->
         <section id="view-reportes" class="view">
-          <div class="cards-grid">
-            <!-- Selector de rango de fechas -->
-            <div class="card card-full">
-              <h3>Filtro de reportes</h3>
-              <form id="form-rep-filtro">
-                <div class="form-row">
+          <div class="reports-shell">
+            <div class="card card-full reports-hero-card">
+              <div class="reports-hero-copy">
+                <span class="eyebrow">Reportes</span>
+                <h3>Ingresos y rendimiento</h3>
+                <p class="small-text">Consulta ventas cerradas, actividad diaria, clientes frecuentes y desempeño del equipo.</p>
+                <span id="rep-range-label" class="reports-range-label">Sin rango seleccionado</span>
+              </div>
+
+              <form id="form-rep-filtro" class="reports-filter-panel">
+                <div class="reports-quick-actions">
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-rep-hoy">Hoy</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-rep-7">7 días</button>
+                  <button type="button" class="btn btn-secondary btn-sm" id="btn-rep-30">30 días</button>
+                </div>
+                <div class="reports-filter-grid">
                   <div class="form-group">
                     <label for="rep-desde">Desde</label>
                     <input type="date" id="rep-desde" />
@@ -836,43 +1705,238 @@
                     <label for="rep-hasta">Hasta</label>
                     <input type="date" id="rep-hasta" />
                   </div>
-                  <div class="form-group">
-                    <button type="submit" class="btn btn-primary">Generar reportes</button>
-                  </div>
+                </div>
+                <div class="reports-filter-actions">
+                  <button type="submit" class="btn btn-primary">Generar reportes</button>
+                  <button type="button" id="btn-rep-exportar" class="btn btn-outline">Exportar CSV</button>
                 </div>
               </form>
             </div>
 
-            <!-- Resumen general -->
-            <div class="card">
-              <h3>Resumen de ingresos</h3>
-              <div class="stats-grid">
-                <div class="stat-box">
+            <div class="reports-kpi-grid">
+              <div class="metric-card report-metric metric-money">
+                <span class="metric-icon">$</span>
+                <span class="metric-label">Ingresos totales</span>
+                <strong id="rep-total" class="metric-value">$ 0</strong>
+                <small id="rep-cant-total">0 servicios</small>
+              </div>
+              <div class="metric-card report-metric">
+                <span class="metric-icon">T</span>
+                <span class="metric-label">Ticket promedio</span>
+                <strong id="rep-ticket-promedio" class="metric-value">$ 0</strong>
+                <small>Por servicio cerrado</small>
+              </div>
+              <div class="metric-card report-metric">
+                <span class="metric-icon">M</span>
+                <span class="metric-label">Módulo líder</span>
+                <strong id="rep-top-canal" class="metric-value">-</strong>
+                <small>Mayor aporte del rango</small>
+              </div>
+              <div class="metric-card report-metric">
+                <span class="metric-icon">D</span>
+                <span class="metric-label">Promedio diario</span>
+                <strong id="rep-promedio-diario" class="metric-value">$ 0</strong>
+                <small id="rep-generated-at">Sin generar</small>
+              </div>
+            </div>
+
+            <div class="card card-full reports-breakdown-card">
+              <div class="panel-heading">
+                <h3>Distribución de ingresos</h3>
+                <span id="rep-breakdown-total">$ 0</span>
+              </div>
+              <div class="revenue-stack reports-stack" aria-label="Distribución de ingresos por módulo">
+                <div id="rep-revenue-parqueadero-bar" class="revenue-segment segment-parqueadero"></div>
+                <div id="rep-revenue-lavadero-bar" class="revenue-segment segment-lavadero"></div>
+                <div id="rep-revenue-taller-bar" class="revenue-segment segment-taller"></div>
+              </div>
+              <div class="reports-breakdown-grid">
+                <div>
                   <span class="stat-label">Parqueadero</span>
-                  <span id="rep-pq-total" class="stat-value">$ 0</span>
-                  <span id="rep-pq-cant" class="stat-detail">0 servicios</span>
+                  <strong id="rep-pq-total">$ 0</strong>
+                  <small id="rep-pq-cant">0 servicios</small>
                 </div>
-                <div class="stat-box">
+                <div>
                   <span class="stat-label">Lavadero</span>
-                  <span id="rep-lav-total" class="stat-value">$ 0</span>
-                  <span id="rep-lav-cant" class="stat-detail">0 servicios</span>
+                  <strong id="rep-lav-total">$ 0</strong>
+                  <small id="rep-lav-cant">0 servicios</small>
                 </div>
-                <div class="stat-box">
+                <div>
                   <span class="stat-label">Taller</span>
-                  <span id="rep-tal-total" class="stat-value">$ 0</span>
-                  <span id="rep-tal-cant" class="stat-detail">0 servicios</span>
-                </div>
-                <div class="stat-box highlight">
-                  <span class="stat-label">Total General</span>
-                  <span id="rep-total" class="stat-value">$ 0</span>
-                  <span id="rep-cant-total" class="stat-detail">0 servicios</span>
+                  <strong id="rep-tal-total">$ 0</strong>
+                  <small id="rep-tal-cant">0 servicios</small>
                 </div>
               </div>
             </div>
 
-            <!-- Reporte diario -->
-            <div class="card card-expand">
-              <h3>Ingresos por día</h3>
+            <div class="card card-full cash-close-card">
+              <div class="panel-heading">
+                <div>
+                  <h3>Cierre de caja</h3>
+                  <p class="small-text">Recaudo por método de pago, cartera pendiente y movimientos cerrados del periodo.</p>
+                </div>
+                <div class="cash-close-status">
+                  <span id="rep-caja-status" class="badge badge-muted">Sin generar</span>
+                  <span id="rep-caja-updated" class="small-text">Sin actualizar</span>
+                </div>
+              </div>
+
+              <div class="cash-summary-grid">
+                <div class="cash-summary-item cash-summary-main">
+                  <span>Recaudado</span>
+                  <strong id="rep-caja-recaudado">$ 0</strong>
+                  <small id="rep-caja-pagados">0 servicios pagados</small>
+                </div>
+                <div class="cash-summary-item">
+                  <span>Pendiente</span>
+                  <strong id="rep-caja-pendiente">$ 0</strong>
+                  <small id="rep-caja-pendientes-count">0 servicios pendientes</small>
+                </div>
+                <div class="cash-summary-item">
+                  <span>Facturado</span>
+                  <strong id="rep-caja-facturado">$ 0</strong>
+                  <small id="rep-caja-servicios">0 servicios cerrados</small>
+                </div>
+                <div class="cash-summary-item">
+                  <span>Diferencia</span>
+                  <strong id="rep-caja-diferencia">$ 0</strong>
+                  <small>Facturado menos recaudado</small>
+                </div>
+              </div>
+
+              <form id="form-caja-arqueo" class="cash-audit-form">
+                <div class="cash-audit-copy">
+                  <span class="eyebrow">Arqueo</span>
+                  <h3>Guardar cierre del periodo</h3>
+                  <p class="small-text">Cuenta el efectivo físico, registra la diferencia y deja una observación del turno.</p>
+                </div>
+                <div class="cash-audit-fields">
+                  <div class="form-group">
+                    <label for="rep-caja-efectivo-contado">Efectivo contado</label>
+                    <input type="number" id="rep-caja-efectivo-contado" min="0" step="100" placeholder="0" />
+                  </div>
+                  <div class="cash-audit-result">
+                    <span>Sistema</span>
+                    <strong id="rep-caja-efectivo-sistema">$ 0</strong>
+                    <small>Diferencia: <b id="rep-caja-efectivo-diferencia">$ 0</b></small>
+                  </div>
+                </div>
+                <div class="form-group cash-audit-notes">
+                  <label for="rep-caja-observaciones">Observaciones</label>
+                  <textarea id="rep-caja-observaciones" rows="2" placeholder="Notas del turno, novedades o diferencias encontradas..."></textarea>
+                </div>
+                <div class="cash-audit-actions">
+                  <button type="submit" id="btn-guardar-arqueo" class="btn btn-primary">Guardar arqueo</button>
+                  <span id="rep-caja-arqueo-msg" class="small-message" hidden></span>
+                </div>
+              </form>
+
+              <div class="cash-close-grid">
+                <div class="cash-method-panel">
+                  <div class="list-heading compact-heading">
+                    <h3>Métodos de pago</h3>
+                    <span id="rep-caja-metodos-count" class="badge badge-muted">0 métodos</span>
+                  </div>
+                  <div id="rep-caja-metodos-list" class="cash-method-list"></div>
+                  <div id="rep-caja-metodos-empty" class="table-empty">Sin pagos registrados.</div>
+                </div>
+
+                <div class="cash-method-panel">
+                  <div class="list-heading compact-heading">
+                    <h3>Responsables</h3>
+                    <span id="rep-caja-responsables-count" class="badge badge-muted">0 responsables</span>
+                  </div>
+                  <div id="rep-caja-responsables-list" class="cash-method-list"></div>
+                  <div id="rep-caja-responsables-empty" class="table-empty">Sin responsables para el rango.</div>
+                </div>
+              </div>
+
+              <div class="reports-two-column cash-tables-grid">
+                <div class="reports-table-card">
+                  <div class="list-heading">
+                    <div>
+                      <h3>Pendientes por cobrar</h3>
+                      <p class="small-text">Servicios cerrados sin método de pago registrado.</p>
+                    </div>
+                    <span id="rep-caja-pendientes-badge" class="badge badge-muted">0 pendientes</span>
+                  </div>
+                  <div class="table-wrapper">
+                    <table class="table">
+                      <thead>
+                        <tr>
+                          <th>Servicio</th>
+                          <th>Cliente</th>
+                          <th>Monto</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody id="rep-caja-pendientes-tbody"></tbody>
+                    </table>
+                    <div id="rep-caja-pendientes-empty" class="table-empty">No hay pendientes por cobrar.</div>
+                  </div>
+                  <div id="rep-caja-msg" class="small-message" hidden></div>
+                </div>
+
+                <div class="reports-table-card">
+                  <div class="list-heading">
+                    <div>
+                      <h3>Movimientos de caja</h3>
+                      <p class="small-text">Últimos servicios cerrados en el periodo seleccionado.</p>
+                    </div>
+                    <span id="rep-caja-movimientos-count" class="badge badge-muted">0 movimientos</span>
+                  </div>
+                  <div class="table-wrapper">
+                    <table class="table">
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Módulo</th>
+                          <th>Método</th>
+                          <th>Total</th>
+                        </tr>
+                      </thead>
+                      <tbody id="rep-caja-movimientos-tbody"></tbody>
+                    </table>
+                    <div id="rep-caja-movimientos-empty" class="table-empty">Sin movimientos de caja.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="cash-archive-panel">
+                <div class="list-heading">
+                  <div>
+                    <h3>Arqueos guardados</h3>
+                    <p class="small-text">Histórico de cierres registrados para control y auditoría.</p>
+                  </div>
+                  <span id="rep-caja-arqueos-count" class="badge badge-muted">0 arqueos</span>
+                </div>
+                <div class="table-wrapper">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Recaudado</th>
+                        <th>Efectivo</th>
+                        <th>Diferencia</th>
+                        <th>Usuario</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-caja-arqueos-tbody"></tbody>
+                  </table>
+                  <div id="rep-caja-arqueos-empty" class="table-empty">Aún no hay arqueos guardados.</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-full reports-table-card">
+              <div class="list-heading">
+                <div>
+                  <h3>Ingresos por día</h3>
+                  <p class="small-text">Detalle diario de servicios cerrados por módulo.</p>
+                </div>
+                <span id="rep-diario-count" class="badge badge-muted">0 días</span>
+              </div>
               <div class="table-wrapper">
                 <table class="table">
                   <thead>
@@ -890,40 +1954,249 @@
               </div>
             </div>
 
-            <!-- Clientes más activos -->
-            <div class="card card-expand">
-              <h3>Clientes más activos</h3>
-              <div class="table-wrapper">
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Cliente</th>
-                      <th>Servicios</th>
-                      <th>Total gastado</th>
-                    </tr>
-                  </thead>
-                  <tbody id="rep-clientes-tbody"></tbody>
-                </table>
-                <div id="rep-clientes-empty" class="table-empty">Sin datos para el rango seleccionado.</div>
+            <div class="reports-two-column">
+              <div class="card reports-table-card">
+                <div class="list-heading">
+                  <div>
+                    <h3>Clientes más activos</h3>
+                    <p class="small-text">Clientes con mayor gasto en el periodo.</p>
+                  </div>
+                  <span id="rep-clientes-count" class="badge badge-muted">0 clientes</span>
+                </div>
+                <div class="table-wrapper">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th>Cliente</th>
+                        <th>Servicios</th>
+                        <th>Total gastado</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-clientes-tbody"></tbody>
+                  </table>
+                  <div id="rep-clientes-empty" class="table-empty">Sin datos para el rango seleccionado.</div>
+                </div>
+              </div>
+
+              <div class="card reports-table-card">
+                <div class="list-heading">
+                  <div>
+                    <h3>Equipo productivo</h3>
+                    <p class="small-text">Servicios e ingresos asociados a empleados activos.</p>
+                  </div>
+                  <span id="rep-empleados-count" class="badge badge-muted">0 empleados</span>
+                </div>
+                <div class="table-wrapper">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th>Empleado</th>
+                        <th>Rol</th>
+                        <th>Servicios</th>
+                        <th>Ingresos</th>
+                      </tr>
+                    </thead>
+                    <tbody id="rep-empleados-tbody"></tbody>
+                  </table>
+                  <div id="rep-empleados-empty" class="table-empty">Sin datos para el rango seleccionado.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- MÓDULO EMPRESAS -->
+        <section id="view-empresas" class="view">
+          <div class="cards-grid">
+            <div class="card card-full companies-hero-card">
+              <div>
+                <span class="eyebrow">Administración central</span>
+                <h3>Gestión Multi-Empresa</h3>
+                <p class="small-text">Crea, edita, activa y supervisa empresas desde una consola central.</p>
+              </div>
+              <div class="company-summary-grid">
+                <div>
+                  <span class="stat-label">Empresas</span>
+                  <strong id="empresas-total" class="stat-value">0</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Activas</span>
+                  <strong id="empresas-activas" class="stat-value">0</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Usuarios</span>
+                  <strong id="empresas-usuarios" class="stat-value">0</strong>
+                </div>
               </div>
             </div>
 
-            <!-- Empleados más productivos -->
+            <div class="card card-full company-form-card">
+              <div class="form-card-heading">
+                <div>
+                  <h3 id="empresa-admin-form-title">Crear empresa</h3>
+                  <p class="small-text">El correo del administrador debe ser único porque el inicio de sesión usa el email.</p>
+                </div>
+                <button type="button" id="btn-empresa-cancelar-edicion" class="btn btn-secondary btn-sm hidden">Cancelar edición</button>
+              </div>
+
+              <form id="form-empresa-admin">
+                <input type="hidden" id="empresa-admin-id" />
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-admin-nombre">Nombre *</label>
+                    <input type="text" id="empresa-admin-nombre" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-admin-nit">NIT</label>
+                    <input type="text" id="empresa-admin-nit" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-admin-ciudad">Ciudad</label>
+                    <input type="text" id="empresa-admin-ciudad" />
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-admin-direccion">Dirección</label>
+                    <input type="text" id="empresa-admin-direccion" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-admin-telefono">Teléfono</label>
+                    <input type="tel" id="empresa-admin-telefono" />
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-admin-email">Email de contacto</label>
+                    <input type="email" id="empresa-admin-email" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-admin-zona">Zona horaria</label>
+                    <select id="empresa-admin-zona">
+                      <option value="America/Bogota">America/Bogota</option>
+                      <option value="America/Mexico_City">America/Mexico_City</option>
+                      <option value="America/Santiago">America/Santiago</option>
+                      <option value="America/Lima">America/Lima</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-admin-licencia">Tipo de licencia</label>
+                    <select id="empresa-admin-licencia">
+                      <option value="Demo">Demo</option>
+                      <option value="Básica">Básica</option>
+                      <option value="Pro">Pro</option>
+                      <option value="Premium">Premium</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-admin-licencia-fin">Fin de licencia</label>
+                    <input type="date" id="empresa-admin-licencia-fin" />
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-admin-activa">Estado</label>
+                    <select id="empresa-admin-activa">
+                      <option value="true">Activa</option>
+                      <option value="false">Inactiva</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div id="empresa-admin-usuario-fields" class="company-admin-fields">
+                  <h4>Administrador inicial</h4>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="empresa-admin-user-nombre">Nombre del administrador</label>
+                      <input type="text" id="empresa-admin-user-nombre" />
+                    </div>
+                    <div class="form-group">
+                      <label for="empresa-admin-user-email">Correo de acceso</label>
+                      <input type="email" id="empresa-admin-user-email" />
+                    </div>
+                  </div>
+                  <div class="form-group">
+                    <label for="empresa-admin-user-password">Contraseña inicial</label>
+                    <input type="password" id="empresa-admin-user-password" minlength="6" />
+                  </div>
+                </div>
+
+                <div class="form-actions">
+                  <button type="submit" id="btn-empresa-admin-submit" class="btn btn-primary">Crear empresa</button>
+                </div>
+                <div id="empresa-admin-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <div class="card card-full license-admin-card">
+              <div class="form-card-heading">
+                <div>
+                  <h3>Licencia por empresa</h3>
+                  <p class="small-text">Asigna el plan, define la vigencia y confirma los módulos incluidos.</p>
+                </div>
+                <div id="licencia-empresa-estado" class="license-current">Sin selección</div>
+              </div>
+
+              <form id="form-licencia-empresa">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="licencia-empresa-id">Empresa *</label>
+                    <select id="licencia-empresa-id" required></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="licencia-plan-id">Plan *</label>
+                    <select id="licencia-plan-id" required></select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="licencia-fecha-inicio">Inicio</label>
+                    <input type="date" id="licencia-fecha-inicio" />
+                  </div>
+                  <div class="form-group">
+                    <label for="licencia-fecha-fin">Vencimiento</label>
+                    <input type="date" id="licencia-fecha-fin" />
+                  </div>
+                </div>
+                <div class="license-module-panel">
+                  <span class="stat-label">Módulos incluidos</span>
+                  <div id="licencia-plan-modulos" class="license-module-pills"></div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Asignar licencia</button>
+                </div>
+                <div id="licencia-empresa-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
             <div class="card card-expand">
-              <h3>Empleados más productivos</h3>
+              <div class="list-heading">
+                <h3>Empresas registradas</h3>
+                <div class="search-bar inline-search">
+                  <input type="text" id="empresas-buscar" placeholder="Buscar por nombre, NIT o ciudad..." />
+                </div>
+              </div>
               <div class="table-wrapper">
                 <table class="table">
                   <thead>
                     <tr>
-                      <th>Empleado</th>
-                      <th>Rol</th>
-                      <th>Servicios</th>
-                      <th>Ingresos</th>
+                      <th>Empresa</th>
+                      <th>NIT</th>
+                      <th>Ciudad</th>
+                      <th>Usuarios</th>
+                      <th>Clientes</th>
+                      <th>Vehículos</th>
+                      <th>Parqueados</th>
+                      <th>Licencia</th>
+                      <th>Estado</th>
+                      <th></th>
                     </tr>
                   </thead>
-                  <tbody id="rep-empleados-tbody"></tbody>
+                  <tbody id="empresas-tbody"></tbody>
                 </table>
-                <div id="rep-empleados-empty" class="table-empty">Sin datos para el rango seleccionado.</div>
+                <div id="empresas-empty" class="table-empty">No hay empresas registradas.</div>
               </div>
             </div>
           </div>
@@ -932,7 +2205,29 @@
         <section id="view-config" class="view">
           <div class="cards-grid">
             <div class="card card-full config-tabs-card">
-              <h3>Configuración</h3>
+              <div class="config-header-main">
+                <span class="eyebrow">Centro administrativo</span>
+                <h3>Configuración</h3>
+                <p class="small-text">Administra la identidad, operación, plan y apariencia de la empresa.</p>
+              </div>
+              <div class="config-summary-strip" aria-label="Resumen de configuración">
+                <div class="config-summary-item">
+                  <span>Empresa</span>
+                  <strong id="config-summary-empresa">-</strong>
+                </div>
+                <div class="config-summary-item">
+                  <span>Plan</span>
+                  <strong id="config-summary-plan">-</strong>
+                </div>
+                <div class="config-summary-item">
+                  <span>Vigencia</span>
+                  <strong id="config-summary-vigencia">-</strong>
+                </div>
+                <div class="config-summary-item">
+                  <span>Módulos</span>
+                  <strong id="config-summary-modulos">-</strong>
+                </div>
+              </div>
               <div class="config-tabs" role="tablist" aria-label="Secciones de configuración">
                 <button type="button" class="config-tab active" data-config-tab="empresa">
                   <span>🏢</span>
@@ -955,55 +2250,77 @@
 
             <!-- Información de la Empresa -->
             <div class="card card-full config-panel" data-config-panel="empresa">
-              <h3>Información de la Empresa</h3>
-              <form id="form-empresa">
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="empresa-nombre">Nombre *</label>
-                    <input type="text" id="empresa-nombre" required />
-                  </div>
-                  <div class="form-group">
-                    <label for="empresa-nit">NIT</label>
-                    <input type="text" id="empresa-nit" />
-                  </div>
+              <div class="config-panel-heading">
+                <div>
+                  <span class="eyebrow">Empresa</span>
+                  <h3>Información de la Empresa</h3>
+                  <p class="small-text">Mantén actualizados los datos públicos y la identidad visual.</p>
                 </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="empresa-ciudad">Ciudad</label>
-                    <input type="text" id="empresa-ciudad" />
-                  </div>
-                  <div class="form-group">
-                    <label for="empresa-direccion">Dirección</label>
-                    <input type="text" id="empresa-direccion" />
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="empresa-telefono">Teléfono</label>
-                    <input type="tel" id="empresa-telefono" />
-                  </div>
-                  <div class="form-group">
-                    <label for="empresa-email">Email de Contacto</label>
-                    <input type="email" id="empresa-email" />
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="empresa-zona-horaria">Zona Horaria</label>
-                    <select id="empresa-zona-horaria">
-                      <option value="America/Bogota">America/Bogota</option>
-                      <option value="America/Mexico_City">America/Mexico_City</option>
-                      <option value="America/Santiago">America/Santiago</option>
-                      <option value="America/Lima">America/Lima</option>
-                    </select>
-                  </div>
-                  <div class="form-group">
-                    <label for="empresa-logo-file">Subir logo local</label>
-                    <input type="file" id="empresa-logo-file" accept="image/*" />
+                <span id="config-empresa-estado" class="badge badge-success">Activa</span>
+              </div>
+              <form id="form-empresa" class="company-settings-form">
+                <div class="company-settings-grid">
+                  <div class="company-identity-column">
                     <div id="logo-preview" class="logo-preview">Sin logo</div>
+                    <div class="company-identity-copy">
+                      <strong id="empresa-identidad-nombre">Empresa</strong>
+                      <span id="empresa-identidad-contacto">Sin contacto</span>
+                      <span id="empresa-identidad-ciudad">Sin ciudad</span>
+                    </div>
+                    <div class="form-group">
+                      <label for="empresa-logo-file">Logo local</label>
+                      <input type="file" id="empresa-logo-file" accept="image/*" />
+                      <p class="small-text">Usa PNG, JPG o GIF hasta 2 MB.</p>
+                    </div>
+                  </div>
+
+                  <div class="company-form-fields">
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="empresa-nombre">Nombre *</label>
+                        <input type="text" id="empresa-nombre" required />
+                      </div>
+                      <div class="form-group">
+                        <label for="empresa-nit">NIT</label>
+                        <input type="text" id="empresa-nit" />
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="empresa-ciudad">Ciudad</label>
+                        <input type="text" id="empresa-ciudad" />
+                      </div>
+                      <div class="form-group">
+                        <label for="empresa-direccion">Dirección</label>
+                        <input type="text" id="empresa-direccion" />
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="empresa-telefono">Teléfono</label>
+                        <input type="tel" id="empresa-telefono" />
+                      </div>
+                      <div class="form-group">
+                        <label for="empresa-email">Email de Contacto</label>
+                        <input type="email" id="empresa-email" />
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="empresa-zona-horaria">Zona Horaria</label>
+                        <select id="empresa-zona-horaria">
+                          <option value="America/Bogota">America/Bogota</option>
+                          <option value="America/Mexico_City">America/Mexico_City</option>
+                          <option value="America/Santiago">America/Santiago</option>
+                          <option value="America/Lima">America/Lima</option>
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <button type="submit" class="btn btn-primary">Actualizar Empresa</button>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Actualizar Empresa</button>
+                </div>
                 <div id="empresa-error" class="error-message" hidden></div>
                 <div id="empresa-success" class="success-message" hidden></div>
               </form>
@@ -1011,13 +2328,21 @@
 
             <!-- Configuración Parqueadero -->
             <div class="card card-full parking-config-card config-panel hidden" data-config-panel="parqueadero">
+              <div class="config-panel-heading">
+                <div>
+                  <span class="eyebrow">Operación</span>
+                  <h3>Parqueadero y tarifas</h3>
+                  <p class="small-text">Define capacidad, reglas de cobro y valores por tipo de vehículo.</p>
+                </div>
+                <span id="config-parqueadero-status" class="badge badge-success">Activo</span>
+              </div>
               <button type="button" id="btn-toggle-parqueadero-config" class="config-toggle">
-                <span>Configuración Parqueadero - Clic Aquí</span>
+                <span>Ver parámetros operativos</span>
                 <span id="parqueadero-config-chevron">▾</span>
               </button>
 
               <form id="form-parqueadero-config" class="parking-config-body">
-                <div class="checkbox-row">
+                <div class="parking-settings-overview">
                   <label>
                     <input type="checkbox" id="cfg-pq-modulo-activo" />
                     Activar Módulo
@@ -1026,11 +2351,10 @@
                     <input type="checkbox" id="cfg-pq-solo-facturacion" />
                     Mostrar Solo Facturación
                   </label>
-                </div>
-
-                <div class="form-group">
-                  <label for="cfg-pq-valet">Valor de valet parking</label>
-                  <input type="number" id="cfg-pq-valet" min="0" step="100" />
+                  <div class="form-group">
+                    <label for="cfg-pq-valet">Valor de valet parking</label>
+                    <input type="number" id="cfg-pq-valet" min="0" step="100" />
+                  </div>
                 </div>
 
                 <div class="vehicle-config-section">
@@ -1137,8 +2461,14 @@
             </div>
 
             <div class="card card-full config-panel hidden" data-config-panel="apariencia">
-              <h3>Apariencia</h3>
-              <p class="small-text">Elige cómo quieres ver el sistema en este navegador.</p>
+              <div class="config-panel-heading">
+                <div>
+                  <span class="eyebrow">Preferencias</span>
+                  <h3>Apariencia</h3>
+                  <p class="small-text">Elige cómo quieres ver el sistema en este navegador.</p>
+                </div>
+                <span id="config-theme-status" class="badge badge-primary">Modo oscuro</span>
+              </div>
               <div class="theme-options">
                 <button type="button" class="theme-option active" data-theme-option="dark">
                   <span class="theme-preview theme-preview-dark"></span>
@@ -1154,19 +2484,65 @@
             </div>
 
             <!-- Licencia Actual -->
-            <div class="card config-panel hidden" data-config-panel="licencias">
-              <h3>Licencia Actual</h3>
-              <div id="licencia-info">
-                <p><strong>Tipo:</strong> <span id="licencia-nombre">-</span></p>
-                <p><strong>Inicio:</strong> <span id="licencia-inicio">-</span></p>
-                <p><strong>Vencimiento:</strong> <span id="licencia-fin">-</span></p>
-                <p><strong>Estado:</strong> <span id="licencia-estado">-</span></p>
-                <div id="licencia-modulos">
-                  <p><strong>Módulos incluidos:</strong></p>
-                  <ul id="modulos-lista"></ul>
+            <div class="card card-full config-panel hidden license-plan-card" data-config-panel="licencias">
+              <div class="license-plan-hero">
+                <div>
+                  <span class="eyebrow">Plan actual</span>
+                  <h3 id="licencia-nombre">Sin licencia</h3>
+                  <p id="licencia-descripcion" class="small-text">No hay información de licencia cargada.</p>
+                </div>
+                <div class="license-status-panel">
+                  <span id="licencia-estado" class="badge badge-muted">Inactiva</span>
+                  <strong id="licencia-dias-restantes">-</strong>
+                  <small id="licencia-vigencia-texto">Sin vencimiento registrado</small>
                 </div>
               </div>
-              <button id="btn-renovar-licencia" class="btn btn-secondary hidden">Renovar Licencia</button>
+
+              <div id="licencia-info" class="license-metrics-grid">
+                <div class="license-metric">
+                  <span>Inicio</span>
+                  <strong id="licencia-inicio">-</strong>
+                </div>
+                <div class="license-metric">
+                  <span>Vencimiento</span>
+                  <strong id="licencia-fin">-</strong>
+                </div>
+                <div class="license-metric">
+                  <span>Valor del plan</span>
+                  <strong id="licencia-precio">-</strong>
+                </div>
+                <div class="license-metric">
+                  <span>Módulos activos</span>
+                  <strong id="licencia-modulos-total">0</strong>
+                </div>
+              </div>
+
+              <div class="license-timeline">
+                <div>
+                  <strong>Vigencia consumida</strong>
+                  <span id="licencia-progreso-texto">Sin rango de fechas</span>
+                </div>
+                <div class="license-progress" aria-label="Vigencia consumida">
+                  <span id="licencia-progress-bar"></span>
+                </div>
+              </div>
+
+              <div id="licencia-modulos" class="license-module-panel">
+                <div class="list-heading">
+                  <div>
+                    <h3>Módulos incluidos</h3>
+                    <p class="small-text">Estos accesos están disponibles para la empresa según el plan vigente.</p>
+                  </div>
+                  <span id="licencia-modulos-badge" class="badge badge-teal">0 activos</span>
+                </div>
+                <div id="modulos-lista" class="license-modules-grid"></div>
+              </div>
+
+              <div class="license-actions">
+                <button id="btn-gestionar-licencia" type="button" class="btn btn-primary hidden">Gestionar plan</button>
+                <button id="btn-renovar-licencia" type="button" class="btn btn-secondary hidden">Solicitar renovación</button>
+                <span id="licencia-help-text" class="small-text">Los cambios de plan se aplican desde Gestión Multi-Empresa.</span>
+              </div>
             </div>
 
             <!-- Gestión de Licencias (Solo Admin) -->
@@ -1438,7 +2814,24 @@
 
     <div class="modal-footer">
       <button type="button" class="btn btn-secondary" onclick="cerrarModalCobroServicio()">Cancelar</button>
-      <button type="button" class="btn btn-primary btn-lg" onclick="confirmarCobroServicio()">✓ Confirmar servicio y pago</button>
+      <button type="button" id="btn-confirmar-cobro-servicio" class="btn btn-primary btn-lg" onclick="confirmarCobroServicio()">✓ Confirmar servicio y pago</button>
+    </div>
+  </div>
+</div>
+
+<div id="modal-recibo" class="modal hidden">
+  <div class="modal-content modal-xl">
+    <div class="modal-header">
+      <h3 id="recibo-modal-title">Comprobante</h3>
+      <button type="button" class="modal-close" onclick="cerrarModalRecibo()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="recibo-print-area" class="receipt-document"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-secondary" onclick="descargarReciboHtml()">Descargar HTML</button>
+      <button type="button" class="btn btn-primary" onclick="imprimirRecibo()">Imprimir</button>
+      <button type="button" class="btn btn-secondary" onclick="cerrarModalRecibo()">Cerrar</button>
     </div>
   </div>
 </div>

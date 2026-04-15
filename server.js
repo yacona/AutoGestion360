@@ -21,7 +21,9 @@ const auditorialRoutes = require("./routes/auditoria");
 const reportesParqueaderoRoutes = require("./routes/reportes-parqueadero");
 const licenciasRoutes = require("./routes/licencias");
 const configuracionRoutes = require("./routes/configuracion");
-const verificarLicencia = require("./middleware/licencia");
+const empresasRoutes = require("./routes/empresas");
+const usuariosRoutes = require("./routes/usuarios");
+const licenseMiddleware = require("./middleware/licencia");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -44,21 +46,23 @@ app.get("/api/ping", (req, res) => {
 app.use("/api", authRoutes);
 
 // Rutas privadas (con auth y verificación de licencia)
-app.use("/api/clientes", authMiddleware, clientesRoutes);
-app.use("/api/vehiculos", authMiddleware, vehiculosRoutes);
-app.use("/api/parqueadero", authMiddleware, verificarLicencia, parqueaderoRoutes);
-app.use("/api/empleados", authMiddleware, empleadosRoutes);
-app.use("/api/lavadero", authMiddleware, verificarLicencia, lavaderoRoutes);
-app.use("/api/taller", authMiddleware, verificarLicencia, tallerRoutes);
-app.use("/api/reportes", authMiddleware, reportesRoutes);
+app.use("/api/clientes", authMiddleware, licenseMiddleware("clientes"), clientesRoutes);
+app.use("/api/vehiculos", authMiddleware, licenseMiddleware("parqueadero"), vehiculosRoutes);
+app.use("/api/parqueadero", authMiddleware, licenseMiddleware("parqueadero"), parqueaderoRoutes);
+app.use("/api/empleados", authMiddleware, licenseMiddleware("empleados"), empleadosRoutes);
+app.use("/api/lavadero", authMiddleware, licenseMiddleware("lavadero"), lavaderoRoutes);
+app.use("/api/taller", authMiddleware, licenseMiddleware("taller"), tallerRoutes);
+app.use("/api/reportes", authMiddleware, licenseMiddleware("reportes"), reportesRoutes);
 
 // Rutas de parqueadero avanzado
-app.use("/api/tarifas", authMiddleware, tarifasRoutes);
+app.use("/api/tarifas", authMiddleware, licenseMiddleware("configuracion"), tarifasRoutes);
 app.use("/api/pagos", authMiddleware, pagosRoutes);
 app.use("/api/alertas", authMiddleware, alertasRoutes);
 app.use("/api/auditoria", authMiddleware, auditorialRoutes);
-app.use("/api/reportes/parqueadero", authMiddleware, reportesParqueaderoRoutes);
-app.use("/api/configuracion", authMiddleware, configuracionRoutes);
+app.use("/api/reportes/parqueadero", authMiddleware, licenseMiddleware("reportes"), reportesParqueaderoRoutes);
+app.use("/api/configuracion", authMiddleware, licenseMiddleware("configuracion"), configuracionRoutes);
+app.use("/api/empresas", authMiddleware, empresasRoutes);
+app.use("/api/usuarios", authMiddleware, licenseMiddleware("usuarios"), usuariosRoutes);
 
 // Rutas de licencias (solo admin)
 app.use("/api/licencias", licenciasRoutes);

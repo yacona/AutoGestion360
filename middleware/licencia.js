@@ -1,10 +1,17 @@
 // middleware/licencia.js
 const db = require('../db');
+const { ensureLicenciasSchema } = require('../utils/licencias-schema');
 
 const MODULOS_POR_LICENCIA_LEGACY = {
-  demo: ['parqueadero', 'lavadero', 'taller', 'matricula', 'evaluacion'],
-  basica: ['parqueadero', 'lavadero', 'matricula'],
-  premium: ['parqueadero', 'lavadero', 'taller', 'matricula', 'evaluacion'],
+  demo: ['dashboard', 'parqueadero', 'clientes'],
+  basica: ['dashboard', 'parqueadero', 'clientes', 'reportes', 'configuracion'],
+  pro: ['dashboard', 'parqueadero', 'clientes', 'reportes', 'lavadero', 'taller', 'empleados', 'usuarios', 'configuracion'],
+  premium: ['dashboard', 'parqueadero', 'clientes', 'reportes', 'lavadero', 'taller', 'empleados', 'usuarios', 'configuracion', 'empresas'],
+};
+
+const ALIAS_MODULO_RUTA = {
+  tarifas: 'configuracion',
+  vehiculos: 'parqueadero',
 };
 
 function normalizarTexto(valor) {
@@ -20,7 +27,13 @@ function esErrorTablaInexistente(error) {
 }
 
 function moduloDeRuta(req) {
-  return req.baseUrl.split('/').pop();
+  const modulo = normalizarTexto(req.baseUrl.split('/').pop());
+  return ALIAS_MODULO_RUTA[modulo] || modulo;
+}
+
+function normalizarModuloExplicito(modulo) {
+  const normalizado = normalizarTexto(modulo);
+  return ALIAS_MODULO_RUTA[normalizado] || normalizado;
 }
 
 function validarVigencia(licencia, res) {
@@ -67,7 +80,47 @@ async function verificarLicenciaNueva(empresaId, modulo, res) {
     WHERE lm.licencia_id = $1
   `;
   const { rows: modulosPermitidos } = await db.query(moduloQuery, [licencia.licencia_id]);
-  const modulosNombres = modulosPermitidos.map(m => m.nombre);
+  const modulosNombres = modulosPermitidos.map(m => normalizarTexto(m.nombre));
+
+  if (!modulosNombres.includes(modulo)) {
+    res.status(403).json({
+      error: `El módulo '${modulo}' no está incluido en su licencia ${licencia.licencia_nombre}`
+    });
+    return false;
+  }
+
+  return true;
+}
+
+async function verificarLicenciaDirectaEmpresa(empresaId, modulo, res) {
+  const licenciaQuery = `
+    SELECT e.licencia_id, e.licencia_inicio AS fecha_inicio, e.licencia_fin AS fecha_fin,
+           e.activa, l.nombre AS licencia_nombre
+    FROM empresas e
+    JOIN licencias l ON l.id = e.licencia_id
+    WHERE e.id = $1 AND e.licencia_id IS NOT NULL
+    LIMIT 1
+  `;
+  const { rows } = await db.query(licenciaQuery, [empresaId]);
+
+  if (rows.length === 0) {
+    return null;
+  }
+
+  const licencia = rows[0];
+
+  if (!validarVigencia(licencia, res)) {
+    return false;
+  }
+
+  const moduloQuery = `
+    SELECT m.nombre
+    FROM licencia_modulo lm
+    JOIN modulos m ON lm.modulo_id = m.id
+    WHERE lm.licencia_id = $1
+  `;
+  const { rows: modulosPermitidos } = await db.query(moduloQuery, [licencia.licencia_id]);
+  const modulosNombres = modulosPermitidos.map(m => normalizarTexto(m.nombre));
 
   if (!modulosNombres.includes(modulo)) {
     res.status(403).json({
@@ -112,12 +165,13 @@ async function verificarLicenciaLegacy(empresaId, modulo, res) {
   return true;
 }
 
-async function verificarLicencia(req, res, next) {
-  const empresaId = req.user.empresa_id;
-  const modulo = moduloDeRuta(req);
+function crearVerificadorLicencia(moduloExplicito = null) {
+  return async function verificarLicencia(req, res, next) {
+    const empresaId = req.user.empresa_id;
+    const modulo = moduloExplicito ? normalizarModuloExplicito(moduloExplicito) : moduloDeRuta(req);
 
-  try {
     try {
+      await ensureLicenciasSchema();
       const resultadoNuevo = await verificarLicenciaNueva(empresaId, modulo, res);
 
       if (resultadoNuevo === true) {
@@ -127,20 +181,39 @@ async function verificarLicencia(req, res, next) {
       if (resultadoNuevo === false) {
         return;
       }
+
+      const resultadoDirecto = await verificarLicenciaDirectaEmpresa(empresaId, modulo, res);
+      if (resultadoDirecto === true) {
+        return next();
+      }
+
+      if (resultadoDirecto === false) {
+        return;
+      }
+
+      const resultadoLegacy = await verificarLicenciaLegacy(empresaId, modulo, res);
+      if (resultadoLegacy) {
+        return next();
+      }
     } catch (error) {
-      if (!esErrorTablaInexistente(error)) {
-        throw error;
+      if (esErrorTablaInexistente(error)) {
+        const resultadoLegacy = await verificarLicenciaLegacy(empresaId, modulo, res);
+        if (resultadoLegacy) return next();
+      } else {
+        console.error('Error en middleware de licencia:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
       }
     }
-
-    const resultadoLegacy = await verificarLicenciaLegacy(empresaId, modulo, res);
-    if (resultadoLegacy) {
-      return next();
-    }
-  } catch (error) {
-    console.error('Error en middleware de licencia:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
+  };
 }
 
-module.exports = verificarLicencia;
+function licenseMiddleware(arg, res, next) {
+  if (typeof arg === 'string') {
+    return crearVerificadorLicencia(arg);
+  }
+
+  return crearVerificadorLicencia()(arg, res, next);
+}
+
+module.exports = licenseMiddleware;
+module.exports.forModule = crearVerificadorLicencia;

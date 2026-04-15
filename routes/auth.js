@@ -7,8 +7,146 @@ const path = require("path");
 const fs = require("fs");
 const db = require("../db");
 const authMiddleware = require("../middleware/auth");
+const { ensureLicenciasSchema } = require("../utils/licencias-schema");
 
 const router = express.Router();
+
+const LEGACY_LICENSE_MODULES = {
+  demo: ["dashboard", "parqueadero", "clientes"],
+  basica: ["dashboard", "parqueadero", "clientes", "reportes", "configuracion"],
+  pro: ["dashboard", "parqueadero", "clientes", "reportes", "lavadero", "taller", "empleados", "usuarios", "configuracion"],
+  premium: ["dashboard", "parqueadero", "clientes", "reportes", "lavadero", "taller", "empleados", "usuarios", "configuracion", "empresas"],
+};
+
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function isExpired(dateValue) {
+  return Boolean(dateValue && new Date(dateValue) < new Date());
+}
+
+async function getEmpresaLicenciaPermisos(empresaId) {
+  await ensureLicenciasSchema();
+
+  const { rows } = await db.query(
+    `SELECT el.licencia_id, el.fecha_inicio, el.fecha_fin, el.activa,
+            l.nombre AS licencia_nombre, l.descripcion, l.precio
+     FROM empresa_licencia el
+     JOIN licencias l ON el.licencia_id = l.id
+     WHERE el.empresa_id = $1 AND el.activa = true
+     ORDER BY el.creado_en DESC
+     LIMIT 1`,
+    [empresaId]
+  );
+
+  if (rows.length > 0) {
+    const licencia = rows[0];
+    const expirada = isExpired(licencia.fecha_fin);
+    const { rows: modulos } = await db.query(
+      `SELECT m.nombre, m.descripcion
+       FROM licencia_modulo lm
+       JOIN modulos m ON lm.modulo_id = m.id
+       WHERE lm.licencia_id = $1
+       ORDER BY m.nombre`,
+      [licencia.licencia_id]
+    );
+
+    return {
+      licencia: {
+        id: licencia.licencia_id,
+        nombre: licencia.licencia_nombre,
+        descripcion: licencia.descripcion,
+        precio: licencia.precio,
+        fecha_inicio: licencia.fecha_inicio,
+        fecha_fin: licencia.fecha_fin,
+        activa: licencia.activa && !expirada,
+      },
+      expirada,
+      modulos: expirada ? [] : modulos.map((modulo) => modulo.nombre),
+      modulos_detalle: expirada ? [] : modulos,
+    };
+  }
+
+  const { rows: licenciasDirectas } = await db.query(
+    `SELECT e.licencia_id, e.licencia_inicio AS fecha_inicio, e.licencia_fin AS fecha_fin,
+            e.activa, l.nombre AS licencia_nombre, l.descripcion, l.precio
+     FROM empresas e
+     JOIN licencias l ON l.id = e.licencia_id
+     WHERE e.id = $1 AND e.licencia_id IS NOT NULL
+     LIMIT 1`,
+    [empresaId]
+  );
+
+  if (licenciasDirectas.length > 0) {
+    const licencia = licenciasDirectas[0];
+    const expirada = isExpired(licencia.fecha_fin);
+    const { rows: modulos } = await db.query(
+      `SELECT m.nombre, m.descripcion
+       FROM licencia_modulo lm
+       JOIN modulos m ON lm.modulo_id = m.id
+       WHERE lm.licencia_id = $1
+       ORDER BY m.nombre`,
+      [licencia.licencia_id]
+    );
+
+    return {
+      licencia: {
+        id: licencia.licencia_id,
+        nombre: licencia.licencia_nombre,
+        descripcion: licencia.descripcion,
+        precio: licencia.precio,
+        fecha_inicio: licencia.fecha_inicio,
+        fecha_fin: licencia.fecha_fin,
+        activa: licencia.activa && !expirada,
+      },
+      expirada,
+      modulos: expirada ? [] : modulos.map((modulo) => modulo.nombre),
+      modulos_detalle: expirada ? [] : modulos,
+    };
+  }
+
+  const { rows: empresas } = await db.query(
+    `SELECT licencia_tipo, licencia_inicio, licencia_fin, activa
+     FROM empresas
+     WHERE id = $1
+     LIMIT 1`,
+    [empresaId]
+  );
+
+  if (empresas.length === 0) {
+    return {
+      licencia: null,
+      expirada: false,
+      modulos: [],
+      modulos_detalle: [],
+    };
+  }
+
+  const empresa = empresas[0];
+  const licenciaKey = normalizeText(empresa.licencia_tipo || "demo");
+  const expirada = isExpired(empresa.licencia_fin);
+  const modulos = expirada ? [] : (LEGACY_LICENSE_MODULES[licenciaKey] || LEGACY_LICENSE_MODULES.demo);
+
+  return {
+    licencia: {
+      id: null,
+      nombre: empresa.licencia_tipo || "Demo",
+      descripcion: "Licencia heredada de empresa",
+      precio: null,
+      fecha_inicio: empresa.licencia_inicio,
+      fecha_fin: empresa.licencia_fin,
+      activa: empresa.activa && !expirada,
+    },
+    expirada,
+    modulos,
+    modulos_detalle: modulos.map((nombre) => ({ nombre, descripcion: "" })),
+  };
+}
 
 const logoDir = path.join(__dirname, "..", "uploads", "empresa");
 if (!fs.existsSync(logoDir)) {
@@ -86,7 +224,7 @@ router.get("/setup-demo", async (req, res) => {
         (empresa_id, nombre, email, password_hash, rol)
        VALUES ($1,$2,$3,$4,$5)
        RETURNING id, empresa_id, nombre, email, rol`,
-      [empresa.id, "Administrador Demo", "admin@demo.com", hash, "Administrador"]
+      [empresa.id, "SuperAdmin Demo", "admin@demo.com", hash, "SuperAdmin"]
     );
 
     const usuario = usuarioResult.rows[0];
@@ -120,15 +258,18 @@ router.post("/login", async (req, res) => {
   }
 
   try {
+    await ensureLicenciasSchema();
     const { rows } = await db.query(
       `SELECT u.id, u.empresa_id, u.nombre, u.email,
               u.password_hash, u.rol, u.activo,
               e.nombre AS empresa_nombre,
               e.logo_url, e.zona_horaria,
-              e.licencia_tipo, e.licencia_fin, e.activa AS empresa_activa
+              e.licencia_tipo, e.licencia_id, e.licencia_fin, e.activa AS empresa_activa
        FROM usuarios u
        JOIN empresas e ON e.id = u.empresa_id
-       WHERE u.email = $1
+       WHERE LOWER(u.email) = LOWER($1)
+       ORDER BY CASE WHEN LOWER(u.rol) IN ('superadmin', 'super_admin', 'super admin') THEN 0 ELSE 1 END,
+                u.id
        LIMIT 1`,
       [email]
     );
@@ -160,6 +301,7 @@ router.post("/login", async (req, res) => {
       token,
       usuario: {
         id: user.id,
+        empresa_id: user.empresa_id,
         nombre: user.nombre,
         email: user.email,
         rol: user.rol,
@@ -170,6 +312,7 @@ router.post("/login", async (req, res) => {
         logo_url: user.logo_url,
         zona_horaria: user.zona_horaria,
         licencia_tipo: user.licencia_tipo,
+        licencia_id: user.licencia_id,
         licencia_fin: user.licencia_fin,
       },
     });
@@ -263,6 +406,7 @@ router.post('/empresa/logo', authMiddleware, (req, res, next) => {
 // Obtener licencia actual de la empresa
 router.get('/empresa/licencia', authMiddleware, async (req, res) => {
   try {
+    await ensureLicenciasSchema();
     const empresaId = req.user.empresa_id;
     const query = `
       SELECT el.*, l.nombre as licencia_nombre, l.descripcion, l.precio
@@ -274,11 +418,24 @@ router.get('/empresa/licencia', authMiddleware, async (req, res) => {
     `;
     const { rows } = await db.query(query, [empresaId]);
 
-    if (rows.length === 0) {
-      return res.json({ mensaje: 'No hay licencia asignada' });
+    let licencia = rows[0];
+
+    if (!licencia) {
+      const directQuery = `
+        SELECT e.licencia_id, e.licencia_inicio AS fecha_inicio, e.licencia_fin AS fecha_fin,
+               e.activa, l.nombre as licencia_nombre, l.descripcion, l.precio
+        FROM empresas e
+        JOIN licencias l ON l.id = e.licencia_id
+        WHERE e.id = $1 AND e.licencia_id IS NOT NULL
+        LIMIT 1
+      `;
+      const { rows: directRows } = await db.query(directQuery, [empresaId]);
+      licencia = directRows[0];
     }
 
-    const licencia = rows[0];
+    if (!licencia) {
+      return res.json({ mensaje: 'No hay licencia asignada' });
+    }
 
     // Obtener módulos incluidos
     const modulosQuery = `
@@ -295,6 +452,27 @@ router.get('/empresa/licencia', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error('Error obteniendo licencia:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+// Obtener permisos de módulos incluidos en la licencia vigente
+router.get('/empresa/licencia/permisos', authMiddleware, async (req, res) => {
+  try {
+    const permisos = await getEmpresaLicenciaPermisos(req.user.empresa_id);
+    res.json(permisos);
+  } catch (error) {
+    console.error('Error obteniendo permisos de licencia:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+router.get('/licencia/permisos', authMiddleware, async (req, res) => {
+  try {
+    const permisos = await getEmpresaLicenciaPermisos(req.user.empresa_id);
+    res.json(permisos);
+  } catch (error) {
+    console.error('Error obteniendo permisos de licencia:', error);
     res.status(500).json({ error: 'Error interno del servidor' });
   }
 });

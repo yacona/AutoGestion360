@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "promote:superadmin": "node scripts/promote-superadmin.js"
   },
   "author": "Victor Alfonso Mena Cordoba",
   "license": "ISC",
