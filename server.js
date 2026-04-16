@@ -20,6 +20,7 @@ const alertasRoutes = require("./routes/alertas");
 const auditorialRoutes = require("./routes/auditoria");
 const reportesParqueaderoRoutes = require("./routes/reportes-parqueadero");
 const licenciasRoutes = require("./routes/licencias");
+const suscripcionesRoutes = require("./routes/suscripciones");
 const configuracionRoutes = require("./routes/configuracion");
 const empresasRoutes = require("./routes/empresas");
 const usuariosRoutes = require("./routes/usuarios");
@@ -66,6 +67,7 @@ app.use("/api/usuarios", authMiddleware, licenseMiddleware("usuarios"), usuarios
 
 // Rutas de licencias (solo admin)
 app.use("/api/licencias", licenciasRoutes);
+app.use("/api/suscripciones", suscripcionesRoutes);
 
 
 

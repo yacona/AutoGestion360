@@ -2,11 +2,15 @@
 const express = require("express");
 const db = require("../db");
 const auth = require("../middleware/auth");
+const {
+  METODOS_PAGO_VALIDOS,
+  registrarPagoServicio,
+  toNumber,
+} = require("../utils/pagos-servicios");
 
 const router = express.Router();
 
 const ESTADOS_OT = ["Diagnóstico", "Diagnostico", "En_Reparacion", "Listo", "Entregado"];
-const METODOS_PAGO_VALIDOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "OTRO"];
 
 /**
  * Helper: calcular totales de una orden con base en sus ítems
@@ -326,19 +330,20 @@ router.patch("/:id/estado", auth, async (req, res) => {
  */
 router.patch("/:id", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
+  const usuario_id = req.user.id;
   const { id } = req.params;
-  const { estado, metodo_pago, detalle_pago } = req.body || {};
+  const {
+    estado,
+    metodo_pago,
+    detalle_pago,
+    monto_pago,
+    referencia_transaccion,
+  } = req.body || {};
 
   if (!estado || !ESTADOS_OT.includes(estado)) {
     return res.status(400).json({
       error:
         "Estado inválido. Valores permitidos: Diagnostico, En_Reparacion, Listo, Entregado",
-    });
-  }
-
-  if (estado === "Entregado" && !metodo_pago) {
-    return res.status(400).json({
-      error: "Debe registrar el método de pago para entregar la orden.",
     });
   }
 
@@ -348,32 +353,109 @@ router.patch("/:id", auth, async (req, res) => {
     });
   }
 
+  let client;
   try {
     const entregar = estado === "Entregado";
+    client = await db.connect();
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `UPDATE ordenes_taller
+       SET estado = $1,
+           fecha_entrega = CASE WHEN $2 THEN COALESCE(fecha_entrega, NOW()) ELSE fecha_entrega END
+       WHERE empresa_id = $3 AND id = $4
+       RETURNING *, descripcion_falla AS descripcion, total_orden AS total_general`,
+      [estado, entregar, empresa_id, id]
+    );
+
+    if (rows.length === 0) {
+      await client.query("ROLLBACK");
+      client.release();
+      client = null;
+      return res.status(404).json({ error: "Orden de taller no encontrada." });
+    }
+
+    let orden = rows[0];
+    let pagoResumen = null;
+    const totalServicio = toNumber(orden.total_general || orden.total_orden);
     const detalleStr =
       detalle_pago !== undefined && detalle_pago !== null
         ? JSON.stringify(detalle_pago)
         : null;
 
-    const { rows } = await db.query(
-      `UPDATE ordenes_taller
-       SET estado = $1,
-           fecha_entrega = CASE WHEN $2 THEN COALESCE(fecha_entrega, NOW()) ELSE fecha_entrega END,
-           metodo_pago = COALESCE($3, metodo_pago),
-           detalle_pago = COALESCE($4::jsonb, detalle_pago)
-       WHERE empresa_id = $5 AND id = $6
-       RETURNING *, descripcion_falla AS descripcion, total_orden AS total_general`,
-      [estado, entregar, metodo_pago || null, detalleStr, empresa_id, id]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "Orden de taller no encontrada." });
+    if (estado === "Entregado" && totalServicio > 0 && !metodo_pago) {
+      await client.query("ROLLBACK");
+      client.release();
+      client = null;
+      return res.status(400).json({
+        error: "Debe registrar el método de pago para entregar la orden.",
+      });
     }
 
-    return res.json(rows[0]);
+    if (estado === "Entregado" && metodo_pago && totalServicio > 0) {
+      const resultadoPago = await registrarPagoServicio({
+        queryable: client,
+        empresaId: empresa_id,
+        usuarioId: usuario_id,
+        modulo: "taller",
+        referenciaId: id,
+        monto: monto_pago,
+        metodoPago: metodo_pago,
+        referenciaTransaccion: referencia_transaccion,
+        detallePago: detalle_pago,
+      });
+
+      pagoResumen = resultadoPago.servicio;
+      const { rows: actualizadoRows } = await client.query(
+        `SELECT *, descripcion_falla AS descripcion, total_orden AS total_general
+         FROM ordenes_taller
+         WHERE empresa_id = $1 AND id = $2
+         LIMIT 1`,
+        [empresa_id, id]
+      );
+      orden = actualizadoRows[0] || orden;
+    } else if (metodo_pago || detalleStr) {
+      const { rows: actualizadoRows } = await client.query(
+        `UPDATE ordenes_taller
+         SET metodo_pago = COALESCE($1, metodo_pago),
+             detalle_pago = COALESCE($2::jsonb, detalle_pago)
+         WHERE empresa_id = $3 AND id = $4
+         RETURNING *, descripcion_falla AS descripcion, total_orden AS total_general`,
+        [metodo_pago || null, detalleStr, empresa_id, id]
+      );
+      orden = actualizadoRows[0] || orden;
+    }
+
+    await client.query("COMMIT");
+    client.release();
+    client = null;
+
+    const mensaje = estado === "Entregado"
+      ? pagoResumen
+        ? pagoResumen.estado_cartera === "PAGADO"
+          ? "Orden entregada y pago registrado correctamente."
+          : "Orden entregada. Se registró un abono y quedó saldo pendiente."
+        : "Orden entregada correctamente."
+      : "Orden actualizada correctamente.";
+
+    return res.json({
+      ...orden,
+      pago_resumen: pagoResumen,
+      mensaje,
+    });
   } catch (err) {
     console.error("🔥 Error actualizando OT:", err);
-    return res.status(500).json({ error: "Error actualizando orden de taller." });
+    try {
+      if (client) {
+        await client.query("ROLLBACK");
+      }
+    } catch (_) {}
+    if (client) {
+      client.release();
+    }
+    return res.status(err.status || 500).json({
+      error: err.message || "Error actualizando orden de taller.",
+    });
   }
 });
 

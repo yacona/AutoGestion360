@@ -8,6 +8,7 @@ const fs = require("fs");
 const db = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { ensureLicenciasSchema } = require("../utils/licencias-schema");
+const { getSuscripcionEmpresa } = require("../utils/suscripciones-schema");
 
 const router = express.Router();
 
@@ -32,6 +33,10 @@ function isExpired(dateValue) {
 
 async function getEmpresaLicenciaPermisos(empresaId) {
   await ensureLicenciasSchema();
+  const suscripcion = await getSuscripcionEmpresa(db, empresaId).catch(() => null);
+  const suscripcionBloqueada = suscripcion
+    ? ["VENCIDA", "SUSPENDIDA", "CANCELADA"].includes(suscripcion.estado_real)
+    : false;
 
   const { rows } = await db.query(
     `SELECT el.licencia_id, el.fecha_inicio, el.fecha_fin, el.activa,
@@ -66,9 +71,10 @@ async function getEmpresaLicenciaPermisos(empresaId) {
         fecha_fin: licencia.fecha_fin,
         activa: licencia.activa && !expirada,
       },
-      expirada,
-      modulos: expirada ? [] : modulos.map((modulo) => modulo.nombre),
-      modulos_detalle: expirada ? [] : modulos,
+      suscripcion,
+      expirada: expirada || suscripcionBloqueada,
+      modulos: expirada || suscripcionBloqueada ? [] : modulos.map((modulo) => modulo.nombre),
+      modulos_detalle: expirada || suscripcionBloqueada ? [] : modulos,
     };
   }
 
@@ -104,9 +110,10 @@ async function getEmpresaLicenciaPermisos(empresaId) {
         fecha_fin: licencia.fecha_fin,
         activa: licencia.activa && !expirada,
       },
-      expirada,
-      modulos: expirada ? [] : modulos.map((modulo) => modulo.nombre),
-      modulos_detalle: expirada ? [] : modulos,
+      suscripcion,
+      expirada: expirada || suscripcionBloqueada,
+      modulos: expirada || suscripcionBloqueada ? [] : modulos.map((modulo) => modulo.nombre),
+      modulos_detalle: expirada || suscripcionBloqueada ? [] : modulos,
     };
   }
 
@@ -121,7 +128,8 @@ async function getEmpresaLicenciaPermisos(empresaId) {
   if (empresas.length === 0) {
     return {
       licencia: null,
-      expirada: false,
+      suscripcion,
+      expirada: suscripcionBloqueada,
       modulos: [],
       modulos_detalle: [],
     };
@@ -142,9 +150,10 @@ async function getEmpresaLicenciaPermisos(empresaId) {
       fecha_fin: empresa.licencia_fin,
       activa: empresa.activa && !expirada,
     },
-    expirada,
-    modulos,
-    modulos_detalle: modulos.map((nombre) => ({ nombre, descripcion: "" })),
+    suscripcion,
+    expirada: expirada || suscripcionBloqueada,
+    modulos: expirada || suscripcionBloqueada ? [] : modulos,
+    modulos_detalle: expirada || suscripcionBloqueada ? [] : modulos.map((nombre) => ({ nombre, descripcion: "" })),
   };
 }
 

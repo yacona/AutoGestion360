@@ -1,6 +1,7 @@
 // middleware/licencia.js
 const db = require('../db');
 const { ensureLicenciasSchema } = require('../utils/licencias-schema');
+const { getSuscripcionEmpresa } = require('../utils/suscripciones-schema');
 
 const MODULOS_POR_LICENCIA_LEGACY = {
   demo: ['dashboard', 'parqueadero', 'clientes'],
@@ -20,6 +21,10 @@ function normalizarTexto(valor) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function esSuperAdmin(req) {
+  return normalizarTexto(req.user?.rol) === 'superadmin';
 }
 
 function esErrorTablaInexistente(error) {
@@ -46,6 +51,36 @@ function validarVigencia(licencia, res) {
 
   if (licencia.activa === false) {
     res.status(403).json({ error: 'La licencia no está activa' });
+    return false;
+  }
+
+  return true;
+}
+
+async function validarSuscripcion(empresaId, res) {
+  const suscripcion = await getSuscripcionEmpresa(db, empresaId);
+  if (!suscripcion) return true;
+
+  const estado = suscripcion.estado_real;
+
+  if (estado === 'VENCIDA') {
+    res.status(403).json({
+      error: 'La suscripcion SaaS de la empresa ha vencido. Renueva el plan para continuar.',
+    });
+    return false;
+  }
+
+  if (estado === 'SUSPENDIDA') {
+    res.status(403).json({
+      error: 'La suscripcion SaaS de la empresa esta suspendida.',
+    });
+    return false;
+  }
+
+  if (estado === 'CANCELADA') {
+    res.status(403).json({
+      error: 'La suscripcion SaaS de la empresa esta cancelada.',
+    });
     return false;
   }
 
@@ -171,7 +206,16 @@ function crearVerificadorLicencia(moduloExplicito = null) {
     const modulo = moduloExplicito ? normalizarModuloExplicito(moduloExplicito) : moduloDeRuta(req);
 
     try {
+      if (esSuperAdmin(req)) {
+        return next();
+      }
+
       await ensureLicenciasSchema();
+      const suscripcionValida = await validarSuscripcion(empresaId, res);
+      if (!suscripcionValida) {
+        return;
+      }
+
       const resultadoNuevo = await verificarLicenciaNueva(empresaId, modulo, res);
 
       if (resultadoNuevo === true) {

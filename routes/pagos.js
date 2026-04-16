@@ -2,20 +2,23 @@
 const express = require("express");
 const db = require("../db");
 const auth = require("../middleware/auth");
+const { ensurePagosServiciosSchema } = require("../utils/pagos-servicios-schema");
+const {
+  METODOS_PAGO_VALIDOS,
+  buildPagosServiciosJoin,
+  enriquecerMovimientoPago,
+  normalizarModulo,
+  obtenerPagosServicioResumen,
+  obtenerServicioRecibo,
+  registrarPagoServicio,
+  toNumber,
+} = require("../utils/pagos-servicios");
 
 const router = express.Router();
-
-function toNumber(value) {
-  const parsed = Number(value || 0);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
 
 function normalizarPlaca(value) {
   return String(value || "").toUpperCase().replace(/\s+/g, "").trim();
 }
-
-const METODOS_PAGO_VALIDOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "OTRO", "MENSUALIDAD"];
-const ESTADOS_PAGO_VALIDOS = ["PAGADO", "PENDIENTE", "MENSUALIDAD"];
 
 function resumirCartera(movimientos, mensualidades) {
   const resumen = {
@@ -23,11 +26,13 @@ function resumirCartera(movimientos, mensualidades) {
     total_pagado: 0,
     total_pendiente: 0,
     total_en_curso: 0,
+    total_abonado: 0,
     total_recurrente_mensual: 0,
     servicios_total: movimientos.length,
     servicios_pagados: 0,
     servicios_pendientes: 0,
     servicios_en_curso: 0,
+    servicios_abonados: 0,
     mensualidades_activas: 0,
     mensualidades_vencidas: 0,
     metodos_pago: [],
@@ -37,22 +42,32 @@ function resumirCartera(movimientos, mensualidades) {
 
   for (const movimiento of movimientos) {
     const monto = toNumber(movimiento.monto);
+    const montoPagado = toNumber(movimiento.monto_pagado);
+    const saldoPendiente = toNumber(movimiento.saldo_pendiente);
     const estado = movimiento.estado_cartera;
 
     if (estado !== "EN_CURSO") {
       resumen.total_facturado += monto;
     }
 
+    if (estado === "PAGADO" || estado === "MENSUALIDAD" || estado === "ABONADO") {
+      resumen.total_pagado += estado === "MENSUALIDAD" ? monto : montoPagado;
+    }
+
     if (estado === "PAGADO" || estado === "MENSUALIDAD") {
-      resumen.total_pagado += monto;
       resumen.servicios_pagados += 1;
       const metodo = movimiento.metodo_pago || (estado === "MENSUALIDAD" ? "MENSUALIDAD" : "SIN_METODO");
       const actual = metodos.get(metodo) || { metodo_pago: metodo, total: 0, cantidad: 0 };
-      actual.total += monto;
+      actual.total += estado === "MENSUALIDAD" ? monto : montoPagado;
       actual.cantidad += 1;
       metodos.set(metodo, actual);
+    } else if (estado === "ABONADO") {
+      resumen.total_abonado += montoPagado;
+      resumen.total_pendiente += saldoPendiente;
+      resumen.servicios_abonados += 1;
+      resumen.servicios_pendientes += 1;
     } else if (estado === "PENDIENTE") {
-      resumen.total_pendiente += monto;
+      resumen.total_pendiente += saldoPendiente || monto;
       resumen.servicios_pendientes += 1;
     } else {
       resumen.total_en_curso += monto;
@@ -80,6 +95,8 @@ function resumirCartera(movimientos, mensualidades) {
 }
 
 async function obtenerCartera({ empresaId, clienteId, placa }) {
+  await ensurePagosServiciosSchema();
+
   const params = [empresaId, clienteId || placa];
   const filtros = clienteId
     ? {
@@ -105,19 +122,26 @@ async function obtenerCartera({ empresaId, clienteId, placa }) {
          p.placa,
          COALESCE(p.hora_salida, p.hora_entrada, p.creado_en) AS fecha,
          COALESCE(p.valor_total, 0) AS monto,
-         p.metodo_pago,
+         p.metodo_pago AS metodo_pago_base,
          COALESCE(p.estado_pago, CASE WHEN p.hora_salida IS NULL THEN 'EN_CURSO' ELSE 'CERRADO' END) AS estado_original,
          p.tipo_servicio AS detalle,
+         p.tipo_servicio,
+         CASE WHEN p.hora_salida IS NOT NULL THEN TRUE ELSE FALSE END AS servicio_cerrado,
          CASE
-           WHEN p.hora_salida IS NULL THEN 'EN_CURSO'
-           WHEN UPPER(COALESCE(p.estado_pago, '')) = 'MENSUALIDAD' THEN 'MENSUALIDAD'
-           WHEN UPPER(COALESCE(p.estado_pago, '')) = 'PAGADO'
-             OR p.metodo_pago IS NOT NULL
-             OR COALESCE(p.valor_total, 0) = 0 THEN 'PAGADO'
-           ELSE 'PENDIENTE'
-         END AS estado_cartera
+           WHEN UPPER(COALESCE(p.estado_pago, '')) IN ('PAGADO', 'MENSUALIDAD')
+             OR NULLIF(TRIM(COALESCE(p.metodo_pago, '')), '') IS NOT NULL
+             OR COALESCE(p.valor_total, 0) = 0
+           THEN TRUE
+           ELSE FALSE
+         END AS legacy_paid,
+         COALESCE(psp.total_pagado, 0) AS total_pagado_registrado,
+         COALESCE(psp.cantidad_pagos, 0) AS cantidad_pagos,
+         COALESCE(psp.metodos_distintos, 0) AS metodos_distintos,
+         psp.ultimo_metodo_pago,
+         psp.ultimo_pago
        FROM parqueadero p
        LEFT JOIN vehiculos v ON v.id = p.vehiculo_id
+       ${buildPagosServiciosJoin("parqueadero", "p.id", "psp")}
        WHERE p.empresa_id = $1 AND ${filtros.parqueadero}
 
        UNION ALL
@@ -129,16 +153,25 @@ async function obtenerCartera({ empresaId, clienteId, placa }) {
          l.placa,
          COALESCE(l.hora_fin, l.hora_inicio, l.creado_en) AS fecha,
          COALESCE(l.precio, 0) AS monto,
-         l.metodo_pago,
+         l.metodo_pago AS metodo_pago_base,
          l.estado AS estado_original,
          'Servicio de lavado' AS detalle,
+         NULL::varchar AS tipo_servicio,
+         CASE WHEN l.estado = 'Completado' THEN TRUE ELSE FALSE END AS servicio_cerrado,
          CASE
-           WHEN l.metodo_pago IS NOT NULL THEN 'PAGADO'
-           WHEN l.estado = 'Completado' THEN 'PENDIENTE'
-           ELSE 'EN_CURSO'
-         END AS estado_cartera
+           WHEN NULLIF(TRIM(COALESCE(l.metodo_pago, '')), '') IS NOT NULL
+             OR COALESCE(l.precio, 0) = 0
+           THEN TRUE
+           ELSE FALSE
+         END AS legacy_paid,
+         COALESCE(psl.total_pagado, 0) AS total_pagado_registrado,
+         COALESCE(psl.cantidad_pagos, 0) AS cantidad_pagos,
+         COALESCE(psl.metodos_distintos, 0) AS metodos_distintos,
+         psl.ultimo_metodo_pago,
+         psl.ultimo_pago
        FROM lavadero l
        LEFT JOIN vehiculos v ON v.id = l.vehiculo_id
+       ${buildPagosServiciosJoin("lavadero", "l.id", "psl")}
        WHERE l.empresa_id = $1 AND ${filtros.lavadero}
 
        UNION ALL
@@ -150,16 +183,25 @@ async function obtenerCartera({ empresaId, clienteId, placa }) {
          t.placa,
          COALESCE(t.fecha_entrega, t.fecha_creacion) AS fecha,
          COALESCE(t.total_orden, 0) AS monto,
-         t.metodo_pago,
+         t.metodo_pago AS metodo_pago_base,
          t.estado AS estado_original,
          COALESCE(t.descripcion_falla, 'Orden de taller') AS detalle,
+         NULL::varchar AS tipo_servicio,
+         CASE WHEN t.estado = 'Entregado' THEN TRUE ELSE FALSE END AS servicio_cerrado,
          CASE
-           WHEN t.metodo_pago IS NOT NULL THEN 'PAGADO'
-           WHEN t.estado = 'Entregado' THEN 'PENDIENTE'
-           ELSE 'EN_CURSO'
-         END AS estado_cartera
+           WHEN NULLIF(TRIM(COALESCE(t.metodo_pago, '')), '') IS NOT NULL
+             OR COALESCE(t.total_orden, 0) = 0
+           THEN TRUE
+           ELSE FALSE
+         END AS legacy_paid,
+         COALESCE(pst.total_pagado, 0) AS total_pagado_registrado,
+         COALESCE(pst.cantidad_pagos, 0) AS cantidad_pagos,
+         COALESCE(pst.metodos_distintos, 0) AS metodos_distintos,
+         pst.ultimo_metodo_pago,
+         pst.ultimo_pago
        FROM taller_ordenes t
        LEFT JOIN vehiculos v ON v.id = t.vehiculo_id
+       ${buildPagosServiciosJoin("taller", "t.id", "pst")}
        WHERE t.empresa_id = $1 AND ${filtros.taller}
      ) cartera
      ORDER BY fecha DESC NULLS LAST
@@ -184,10 +226,7 @@ async function obtenerCartera({ empresaId, clienteId, placa }) {
     params
   );
 
-  const movimientos = movimientosRaw.map((movimiento) => ({
-    ...movimiento,
-    monto: toNumber(movimiento.monto),
-  }));
+  const movimientos = movimientosRaw.map((movimiento) => enriquecerMovimientoPago(movimiento));
   const mensualidades = mensualidadesRaw.map((mensualidad) => ({
     ...mensualidad,
     valor_mensual: toNumber(mensualidad.valor_mensual),
@@ -197,7 +236,7 @@ async function obtenerCartera({ empresaId, clienteId, placa }) {
   return {
     resumen,
     movimientos,
-    pendientes: movimientos.filter((movimiento) => movimiento.estado_cartera === "PENDIENTE"),
+    pendientes: movimientos.filter((movimiento) => ["PENDIENTE", "ABONADO"].includes(movimiento.estado_cartera)),
     en_curso: movimientos.filter((movimiento) => movimiento.estado_cartera === "EN_CURSO"),
     pagos: movimientos.filter((movimiento) => ["PAGADO", "MENSUALIDAD"].includes(movimiento.estado_cartera)),
     mensualidades,
@@ -232,117 +271,33 @@ function buildReceiptPayload({ tipo, numero, empresa, sujeto, resumen, movimient
   };
 }
 
-async function obtenerServicioRecibo(empresaId, modulo, id) {
-  if (modulo === "parqueadero") {
-    const { rows } = await db.query(
-      `SELECT
-         p.id::text AS referencia_id,
-         'parqueadero' AS modulo,
-         'Parqueadero' AS tipo,
-         p.placa,
-         COALESCE(p.hora_salida, p.hora_entrada, p.creado_en) AS fecha,
-         p.hora_entrada AS inicio,
-         p.hora_salida AS fin,
-         p.minutos_total,
-         COALESCE(p.valor_total, 0) AS monto,
-         p.metodo_pago,
-         COALESCE(p.estado_pago, CASE WHEN p.hora_salida IS NULL THEN 'EN_CURSO' ELSE 'CERRADO' END) AS estado_original,
-         p.tipo_servicio AS detalle,
-         CASE
-           WHEN p.hora_salida IS NULL THEN 'EN_CURSO'
-           WHEN UPPER(COALESCE(p.estado_pago, '')) = 'MENSUALIDAD' THEN 'MENSUALIDAD'
-           WHEN UPPER(COALESCE(p.estado_pago, '')) = 'PAGADO'
-             OR p.metodo_pago IS NOT NULL
-             OR COALESCE(p.valor_total, 0) = 0 THEN 'PAGADO'
-           ELSE 'PENDIENTE'
-         END AS estado_cartera,
-         c.id AS cliente_id,
-         c.nombre AS cliente_nombre,
-         c.documento AS cliente_documento,
-         c.telefono AS cliente_telefono,
-         c.correo AS cliente_correo
-       FROM parqueadero p
-       LEFT JOIN vehiculos v ON v.id = p.vehiculo_id
-       LEFT JOIN clientes c ON c.id = COALESCE(p.cliente_id, v.cliente_id)
-       WHERE p.empresa_id = $1 AND p.id = $2
-       LIMIT 1`,
-      [empresaId, id]
-    );
-    return rows[0] || null;
-  }
+async function obtenerHistorialPagosServicio(queryable, empresaId, modulo, referenciaId) {
+  await ensurePagosServiciosSchema(queryable);
 
-  if (modulo === "lavadero") {
-    const { rows } = await db.query(
-      `SELECT
-         l.id::text AS referencia_id,
-         'lavadero' AS modulo,
-         'Lavadero' AS tipo,
-         l.placa,
-         COALESCE(l.hora_fin, l.hora_inicio, l.creado_en) AS fecha,
-         l.hora_inicio AS inicio,
-         l.hora_fin AS fin,
-         NULL::int AS minutos_total,
-         COALESCE(l.precio, 0) AS monto,
-         l.metodo_pago,
-         l.estado AS estado_original,
-         COALESCE(tl.nombre, 'Servicio de lavado') AS detalle,
-         CASE
-           WHEN l.metodo_pago IS NOT NULL THEN 'PAGADO'
-           WHEN l.estado = 'Completado' THEN 'PENDIENTE'
-           ELSE 'EN_CURSO'
-         END AS estado_cartera,
-         c.id AS cliente_id,
-         c.nombre AS cliente_nombre,
-         c.documento AS cliente_documento,
-         c.telefono AS cliente_telefono,
-         c.correo AS cliente_correo
-       FROM lavadero l
-       LEFT JOIN tipos_lavado tl ON tl.id = l.tipo_lavado_id
-       LEFT JOIN vehiculos v ON v.id = l.vehiculo_id
-       LEFT JOIN clientes c ON c.id = COALESCE(l.cliente_id, v.cliente_id)
-       WHERE l.empresa_id = $1 AND l.id = $2
-       LIMIT 1`,
-      [empresaId, id]
-    );
-    return rows[0] || null;
-  }
+  const { rows } = await queryable.query(
+    `SELECT
+       id,
+       modulo,
+       referencia_id,
+       monto,
+       metodo_pago,
+       referencia_transaccion,
+       detalle_pago,
+       estado,
+       fecha_pago
+     FROM pagos_servicios
+     WHERE empresa_id = $1
+       AND modulo = $2
+       AND referencia_id = $3
+       AND estado = 'APLICADO'
+     ORDER BY fecha_pago DESC, id DESC`,
+    [empresaId, modulo, referenciaId]
+  );
 
-  if (modulo === "taller") {
-    const { rows } = await db.query(
-      `SELECT
-         t.id::text AS referencia_id,
-         'taller' AS modulo,
-         'Taller' AS tipo,
-         t.placa,
-         COALESCE(t.fecha_entrega, t.fecha_creacion) AS fecha,
-         t.fecha_creacion AS inicio,
-         t.fecha_entrega AS fin,
-         NULL::int AS minutos_total,
-         COALESCE(t.total_orden, 0) AS monto,
-         t.metodo_pago,
-         t.estado AS estado_original,
-         COALESCE(t.descripcion_falla, 'Orden de taller') AS detalle,
-         CASE
-           WHEN t.metodo_pago IS NOT NULL THEN 'PAGADO'
-           WHEN t.estado = 'Entregado' THEN 'PENDIENTE'
-           ELSE 'EN_CURSO'
-         END AS estado_cartera,
-         c.id AS cliente_id,
-         c.nombre AS cliente_nombre,
-         c.documento AS cliente_documento,
-         c.telefono AS cliente_telefono,
-         c.correo AS cliente_correo
-       FROM taller_ordenes t
-       LEFT JOIN vehiculos v ON v.id = t.vehiculo_id
-       LEFT JOIN clientes c ON c.id = COALESCE(t.cliente_id, v.cliente_id)
-       WHERE t.empresa_id = $1 AND t.id = $2
-       LIMIT 1`,
-      [empresaId, id]
-    );
-    return rows[0] || null;
-  }
-
-  return null;
+  return rows.map((row) => ({
+    ...row,
+    monto: toNumber(row.monto),
+  }));
 }
 
 // GET cartera 360 de cliente
@@ -558,12 +513,127 @@ router.get("/recibo/vehiculo/:placa", auth, async (req, res) => {
   }
 });
 
+// GET detalle de un servicio con saldo e historial de pagos
+router.get("/servicio/:modulo/:id", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const modulo = normalizarModulo(req.params.modulo);
+  const referenciaId = Number(req.params.id);
+
+  if (!modulo) {
+    return res.status(400).json({ error: "Módulo inválido." });
+  }
+
+  if (!referenciaId) {
+    return res.status(400).json({ error: "Referencia inválida." });
+  }
+
+  try {
+    const servicio = await obtenerServicioRecibo(empresa_id, modulo, referenciaId);
+    if (!servicio) {
+      return res.status(404).json({ error: "Servicio no encontrado." });
+    }
+
+    const pagos = await obtenerHistorialPagosServicio(db, empresa_id, modulo, referenciaId);
+    res.json({
+      ...servicio,
+      pagos,
+    });
+  } catch (err) {
+    console.error("Error obteniendo detalle de servicio:", err);
+    res.status(500).json({ error: "Error obteniendo detalle del servicio." });
+  }
+});
+
+// POST registrar abono o pago a cualquier servicio cerrado
+router.post("/servicio", auth, async (req, res) => {
+  const empresa_id = req.user.empresa_id;
+  const usuario_id = req.user.id;
+  const {
+    modulo,
+    referencia_id,
+    monto,
+    metodo_pago,
+    referencia_transaccion,
+    detalle_pago,
+  } = req.body || {};
+
+  let client;
+  try {
+    client = await db.connect();
+    await client.query("BEGIN");
+    await ensurePagosServiciosSchema(client);
+
+    const resultado = await registrarPagoServicio({
+      queryable: client,
+      empresaId: empresa_id,
+      usuarioId: usuario_id,
+      modulo,
+      referenciaId: referencia_id,
+      monto,
+      metodoPago: metodo_pago,
+      referenciaTransaccion: referencia_transaccion,
+      detallePago: detalle_pago,
+    });
+
+    await client.query("COMMIT");
+    client.release();
+    client = null;
+
+    res.status(201).json({
+      mensaje: resultado.servicio.estado_cartera === "PAGADO"
+        ? "Pago registrado correctamente."
+        : "Abono registrado correctamente.",
+      ...resultado,
+    });
+  } catch (err) {
+    try {
+      if (client) await client.query("ROLLBACK");
+    } catch (_) {}
+    if (client) client.release();
+
+    console.error("Error registrando pago de servicio:", err);
+    res.status(err.status || 500).json({
+      error: err.message || "Error registrando pago del servicio.",
+    });
+  }
+});
+
 // GET pagos de un parqueadero
 router.get("/parqueadero/:parqueadero_id", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const parqueadero_id = req.params.parqueadero_id;
 
   try {
+    await ensurePagosServiciosSchema();
+
+    const { rows: pagosServicios } = await db.query(
+      `SELECT
+         id,
+         empresa_id,
+         referencia_id AS parqueadero_id,
+         monto,
+         metodo_pago,
+         referencia_transaccion,
+         estado,
+         usuario_registro_id,
+         fecha_pago,
+         creado_en
+       FROM pagos_servicios
+       WHERE empresa_id = $1
+         AND modulo = 'parqueadero'
+         AND referencia_id = $2
+         AND estado = 'APLICADO'
+       ORDER BY fecha_pago DESC, id DESC`,
+      [empresa_id, parqueadero_id]
+    );
+
+    if (pagosServicios.length > 0) {
+      return res.json(pagosServicios.map((row) => ({
+        ...row,
+        monto: toNumber(row.monto),
+      })));
+    }
+
     const { rows } = await db.query(
       `SELECT * FROM pagos_parqueadero WHERE parqueadero_id = $1 AND empresa_id = $2 ORDER BY creado_en DESC`,
       [parqueadero_id, empresa_id]
@@ -602,123 +672,49 @@ router.get("/pendientes/listado", auth, async (req, res) => {
 router.post("/", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const usuario_id = req.user.id;
-  let {
+  const {
     parqueadero_id,
     monto,
     metodo_pago,
     referencia_transaccion,
     detalle_pago,
-    estado,
   } = req.body || {};
-
-  parqueadero_id = Number(parqueadero_id);
-  metodo_pago = String(metodo_pago || "").trim().toUpperCase();
-  referencia_transaccion = String(referencia_transaccion || "").trim() || null;
-  estado = String(estado || "PAGADO").trim().toUpperCase();
-
-  if (!parqueadero_id) {
-    return res.status(400).json({ error: "Parqueadero es obligatorio." });
-  }
-
-  if (!metodo_pago) {
-    return res.status(400).json({ error: "Debe seleccionar un método de pago." });
-  }
-
-  if (!METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
-    return res.status(400).json({
-      error: `Método de pago inválido. Opciones válidas: ${METODOS_PAGO_VALIDOS.join(", ")}`,
-    });
-  }
-
-  if (!ESTADOS_PAGO_VALIDOS.includes(estado)) {
-    estado = "PAGADO";
-  }
 
   let client;
   try {
     client = await db.connect();
     await client.query("BEGIN");
+    await ensurePagosServiciosSchema(client);
 
-    const { rows: parqueaderoRows } = await client.query(
-      `SELECT id, valor_total, metodo_pago, estado_pago
-       FROM parqueadero
-       WHERE id = $1 AND empresa_id = $2
-       LIMIT 1`,
-      [parqueadero_id, empresa_id]
-    );
-
-    if (parqueaderoRows.length === 0) {
-      await client.query("ROLLBACK");
-      client.release();
-      client = null;
-      return res.status(404).json({ error: "Servicio de parqueadero no encontrado." });
-    }
-
-    const registro = parqueaderoRows[0];
-    const yaPagado = Boolean(String(registro.metodo_pago || "").trim())
-      || ["PAGADO", "MENSUALIDAD"].includes(String(registro.estado_pago || "").toUpperCase());
-
-    if (yaPagado) {
-      await client.query("ROLLBACK");
-      client.release();
-      client = null;
-      return res.status(409).json({ error: "Este servicio ya tiene un pago registrado." });
-    }
-
-    const montoFinal = Number.isFinite(Number(monto)) && Number(monto) > 0
-      ? Number(monto)
-      : toNumber(registro.valor_total);
-
-    if (!Number.isFinite(montoFinal) || montoFinal < 0) {
-      await client.query("ROLLBACK");
-      client.release();
-      client = null;
-      return res.status(400).json({ error: "Monto inválido para registrar el pago." });
-    }
-
-    const detallePagoTexto = detalle_pago === undefined || detalle_pago === null
-      ? null
-      : typeof detalle_pago === "string"
-        ? String(detalle_pago).trim() || null
-        : JSON.stringify(detalle_pago);
-
-    const { rows } = await client.query(
-      `INSERT INTO pagos_parqueadero 
-       (empresa_id, parqueadero_id, monto, metodo_pago, referencia_transaccion, estado, usuario_registro_id, fecha_pago)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-       RETURNING *`,
-      [
-        empresa_id,
-        parqueadero_id,
-        montoFinal,
-        metodo_pago,
-        referencia_transaccion,
-        estado,
-        usuario_id,
-      ]
-    );
-
-    await client.query(
-      `UPDATE parqueadero
-       SET estado_pago = $3,
-           metodo_pago = $4,
-           detalle_pago = COALESCE($5, detalle_pago)
-       WHERE id = $1 AND empresa_id = $2`,
-      [parqueadero_id, empresa_id, estado, metodo_pago, detallePagoTexto]
-    );
+    const resultado = await registrarPagoServicio({
+      queryable: client,
+      empresaId: empresa_id,
+      usuarioId: usuario_id,
+      modulo: "parqueadero",
+      referenciaId: parqueadero_id,
+      monto,
+      metodoPago: metodo_pago,
+      referenciaTransaccion: referencia_transaccion,
+      detallePago: detalle_pago,
+    });
 
     await client.query("COMMIT");
     client.release();
     client = null;
 
-    res.status(201).json(rows[0]);
+    res.status(201).json({
+      mensaje: resultado.servicio.estado_cartera === "PAGADO"
+        ? "Pago registrado correctamente."
+        : "Abono registrado correctamente.",
+      ...resultado,
+    });
   } catch (err) {
     try {
       if (client) await client.query("ROLLBACK");
     } catch (_) {}
     if (client) client.release();
     console.error("Error registrando pago:", err);
-    res.status(500).json({ error: "Error registrando pago." });
+    res.status(err.status || 500).json({ error: err.message || "Error registrando pago." });
   }
 });
 

@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const db = require("../db");
 const { getParqueaderoConfig } = require("../utils/parqueadero-config");
 const { ensureLicenciasSchema } = require("../utils/licencias-schema");
+const { upsertSuscripcionEmpresa } = require("../utils/suscripciones-schema");
 
 const router = express.Router();
 
@@ -193,6 +194,16 @@ router.post("/", async (req, res) => {
 
     const empresa = rows[0];
 
+    const { rows: licencias } = await client.query(
+      `SELECT id, nombre, precio
+       FROM licencias
+       WHERE LOWER(translate(nombre, 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU')) =
+             LOWER(translate($1, 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'))
+       LIMIT 1`,
+      [payload.licencia_tipo || "Demo"]
+    );
+    const licenciaInicial = licencias[0];
+
     if (adminEmail) {
       const hash = await bcrypt.hash(adminPassword, 10);
       await client.query(
@@ -203,6 +214,25 @@ router.post("/", async (req, res) => {
     }
 
     await getParqueaderoConfig(empresa.id, client);
+
+    if (licenciaInicial) {
+      await upsertSuscripcionEmpresa({
+        queryable: client,
+        empresaId: empresa.id,
+        licenciaId: licenciaInicial.id,
+        estado: String(licenciaInicial.nombre || "").toLowerCase() === "demo"
+          ? "TRIAL"
+          : "ACTIVA",
+        fechaInicio: new Date(),
+        fechaFin: payload.licencia_fin,
+        renovacionAutomatica: false,
+        pasarela: "MANUAL",
+        observaciones: "Suscripcion inicial creada al registrar la empresa",
+        moneda: "COP",
+        precioPlan: licenciaInicial.precio,
+      });
+    }
+
     await client.query("COMMIT");
 
     res.status(201).json({

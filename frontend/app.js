@@ -669,7 +669,7 @@ function actualizarCamposPagoServicio(selectId, referenciaGroupId, detalleGroupI
 }
 
 function limpiarModalCobroServicio() {
-  ["cobro-metodo-pago", "cobro-referencia", "cobro-detalle-pago", "cobro-observaciones"]
+  ["cobro-metodo-pago", "cobro-referencia", "cobro-detalle-pago", "cobro-observaciones", "cobro-monto-pago"]
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) el.value = "";
@@ -680,6 +680,46 @@ function limpiarModalCobroServicio() {
     "cobro-referencia-group",
     "cobro-detalle-pago-group"
   );
+}
+
+function configureCobroMonto({
+  total = 0,
+  pagado = 0,
+  saldo = 0,
+  montoSugerido = null,
+  allowPartial = false,
+  requireAmount = true,
+}) {
+  const montoInput = document.getElementById("cobro-monto-pago");
+  const montoHelp = document.getElementById("cobro-monto-help");
+  if (!montoInput) return;
+
+  const totalNum = Number(total || 0);
+  const pagadoNum = Number(pagado || 0);
+  const saldoNum = Number(saldo || 0);
+  const sugerido = montoSugerido === null || montoSugerido === undefined
+    ? (saldoNum > 0 ? saldoNum : totalNum)
+    : Number(montoSugerido || 0);
+
+  if (!requireAmount && saldoNum <= 0 && totalNum <= 0) {
+    montoInput.value = "0";
+    montoInput.max = "0";
+    montoInput.disabled = true;
+    if (montoHelp) {
+      montoHelp.textContent = "Este cierre no requiere cobro adicional.";
+    }
+    return;
+  }
+
+  montoInput.value = sugerido > 0 ? String(Math.round(sugerido)) : "";
+  montoInput.max = saldoNum > 0 ? String(Math.round(saldoNum)) : "";
+  montoInput.disabled = !allowPartial;
+
+  if (montoHelp) {
+    montoHelp.textContent = allowPartial
+      ? `Saldo disponible: ${formatMoney(saldoNum)}. Puedes registrar el pago completo o un abono.`
+      : `Este flujo registra el pago completo del servicio por ${formatMoney(Math.max(totalNum - pagadoNum, 0))}.`;
+  }
 }
 
 function getActiveViewName() {
@@ -731,8 +771,19 @@ function populateCobroServicioModal({
   fin,
   tiempo,
   valor,
+  pagado = 0,
+  saldo = null,
+  montoSugerido = null,
+  allowPartial = false,
+  requireAmount = true,
   actionLabel = "✓ Confirmar servicio y pago",
 }) {
+  const total = Number(valor || 0);
+  const pagadoNum = Number(pagado || 0);
+  const saldoNum = saldo === null || saldo === undefined
+    ? Math.max(total - pagadoNum, 0)
+    : Number(saldo || 0);
+
   setText("cobro-servicio-title", title || "Confirmar servicio y registrar pago");
   setText("cobro-servicio-placa", placa || "—");
   setText("cobro-servicio-tipo", tipo || "Servicio");
@@ -742,9 +793,47 @@ function populateCobroServicioModal({
   setText("cobro-servicio-inicio", inicio || "—");
   setText("cobro-servicio-fin", fin || "—");
   setText("cobro-servicio-tiempo", tiempo || "—");
-  setText("cobro-servicio-valor", formatMoney(Number(valor || 0)));
+  setText("cobro-servicio-valor", formatMoney(total));
+  setText("cobro-servicio-pagado", formatMoney(pagadoNum));
+  setText("cobro-servicio-saldo", formatMoney(saldoNum));
+  configureCobroMonto({
+    total,
+    pagado: pagadoNum,
+    saldo: saldoNum,
+    montoSugerido,
+    allowPartial,
+    requireAmount,
+  });
   setCobroServicioActionLabel(actionLabel);
   document.getElementById("modal-cobro-servicio")?.classList.remove("hidden");
+}
+
+function configureSalidaMonto({ total = 0, esMensualidad = false }) {
+  const montoInput = document.getElementById("pq-monto-pago");
+  const montoHelp = document.getElementById("pq-monto-help");
+  if (!montoInput) return;
+
+  const totalNum = Number(total || 0);
+  const requiereCobro = !esMensualidad && totalNum > 0;
+
+  if (!requiereCobro) {
+    montoInput.value = "0";
+    montoInput.max = "0";
+    montoInput.disabled = true;
+    if (montoHelp) {
+      montoHelp.textContent = esMensualidad
+        ? "Esta salida está cubierta por mensualidad."
+        : "Esta salida no requiere cobro adicional.";
+    }
+    return;
+  }
+
+  montoInput.value = String(Math.round(totalNum));
+  montoInput.max = String(Math.round(totalNum));
+  montoInput.disabled = false;
+  if (montoHelp) {
+    montoHelp.textContent = `Valor pendiente: ${formatMoney(totalNum)}. Puedes registrar el pago completo o un abono.`;
+  }
 }
 
 async function refrescarContextoDespuesDeCobro() {
@@ -804,6 +893,7 @@ async function abrirModalCobroServicio(modulo, id) {
   if (modulo === "lavadero") {
     const orden = await apiFetch(`/api/lavadero/${id}`);
     const fin = new Date();
+    const total = Number(orden.precio || 0);
 
     cobroServicioActual = {
       modulo,
@@ -811,8 +901,18 @@ async function abrirModalCobroServicio(modulo, id) {
       estadoFinal: "Completado",
       endpoint: `/api/lavadero/${id}`,
       successMessageId: "lav-msg",
-      successMessage: "Lavado completado y cobro registrado.",
-      reload: async () => cargarOrdeneesLavadero(),
+      successMessageResolver: (response) => response?.mensaje || "Lavado completado y cobro registrado.",
+      reload: async () => refrescarContextoDespuesDeCobro(),
+      requireAmount: total > 0,
+      requirePaymentMethod: total > 0,
+      buildBody: ({ metodoPago, referencia, detallePago, montoPago }) => {
+        const body = { estado: "Completado" };
+        if (metodoPago) body.metodo_pago = metodoPago;
+        if (Number.isFinite(montoPago) && montoPago > 0) body.monto_pago = montoPago;
+        if (referencia) body.referencia_transaccion = referencia;
+        if (detallePago) body.detalle_pago = detallePago;
+        return body;
+      },
     };
 
     populateCobroServicioModal({
@@ -825,8 +925,13 @@ async function abrirModalCobroServicio(modulo, id) {
       inicio: formatDateTime(orden.hora_inicio),
       fin: fin.toLocaleString("es-CO"),
       tiempo: formatDuration(orden.hora_inicio, fin),
-      valor: orden.precio || 0,
-      actionLabel: "✓ Confirmar servicio y pago",
+      valor: total,
+      pagado: 0,
+      saldo: total,
+      montoSugerido: total,
+      allowPartial: total > 0,
+      requireAmount: total > 0,
+      actionLabel: total > 0 ? "✓ Completar y registrar pago o abono" : "✓ Completar servicio",
     });
     return;
   }
@@ -835,6 +940,7 @@ async function abrirModalCobroServicio(modulo, id) {
     const data = await apiFetch(`/api/taller/${id}`);
     const orden = data.orden || data;
     const fin = new Date();
+    const total = Number(orden.total_general || orden.total_orden || 0);
 
     cobroServicioActual = {
       modulo,
@@ -842,8 +948,18 @@ async function abrirModalCobroServicio(modulo, id) {
       estadoFinal: "Entregado",
       endpoint: `/api/taller/${id}`,
       successMessageId: "tal-msg",
-      successMessage: "Orden entregada y cobro registrado.",
-      reload: async () => cargarOrdensTaller(),
+      successMessageResolver: (response) => response?.mensaje || "Orden entregada y cobro registrado.",
+      reload: async () => refrescarContextoDespuesDeCobro(),
+      requireAmount: total > 0,
+      requirePaymentMethod: total > 0,
+      buildBody: ({ metodoPago, referencia, detallePago, montoPago }) => {
+        const body = { estado: "Entregado" };
+        if (metodoPago) body.metodo_pago = metodoPago;
+        if (Number.isFinite(montoPago) && montoPago > 0) body.monto_pago = montoPago;
+        if (referencia) body.referencia_transaccion = referencia;
+        if (detallePago) body.detalle_pago = detallePago;
+        return body;
+      },
     };
 
     populateCobroServicioModal({
@@ -856,8 +972,13 @@ async function abrirModalCobroServicio(modulo, id) {
       inicio: formatDateTime(orden.fecha_creacion),
       fin: fin.toLocaleString("es-CO"),
       tiempo: formatDuration(orden.fecha_creacion, fin),
-      valor: orden.total_general || orden.total_orden || 0,
-      actionLabel: "✓ Confirmar servicio y pago",
+      valor: total,
+      pagado: 0,
+      saldo: total,
+      montoSugerido: total,
+      allowPartial: total > 0,
+      requireAmount: total > 0,
+      actionLabel: total > 0 ? "✓ Entregar y registrar pago o abono" : "✓ Entregar orden",
     });
     return;
   }
@@ -879,96 +1000,41 @@ async function abrirPagoPendiente(modulo, id) {
     method: "POST",
     successMessageId: messageId,
     reload: async () => refrescarContextoDespuesDeCobro(),
+    successMessageResolver: (data) => data?.mensaje || "Pago registrado correctamente.",
   };
-
-  if (moduloNormalizado === "parqueadero") {
-    const registro = await apiFetch(`/api/parqueadero/${id}`);
-    const monto = Number(registro.valor_total || 0);
-
-    cobroServicioActual = {
-      ...configBase,
-      endpoint: "/api/pagos",
-      successMessage: "Pago de parqueadero registrado correctamente.",
-      buildBody: ({ metodoPago, referencia, detallePago }) => ({
-        parqueadero_id: Number(id),
-        monto,
-        metodo_pago: metodoPago,
-        referencia_transaccion: referencia || null,
-        detalle_pago: detallePago,
-        estado: "PAGADO",
-      }),
-    };
-
-    populateCobroServicioModal({
-      title: "Registrar pago pendiente de parqueadero",
-      placa: registro.placa || "—",
-      tipo: registro.tipo_servicio || registro.tipo_vehiculo || "Parqueadero",
-      responsable: "Caja parqueadero",
-      estado: registro.estado_pago || "Pendiente por pago",
-      cliente: registro.nombre_cliente || "No registrado",
-      inicio: formatDateTime(registro.hora_entrada),
-      fin: formatDateTime(registro.hora_salida),
-      tiempo: formatDuration(registro.hora_entrada, registro.hora_salida || new Date()),
-      valor: monto,
-      actionLabel: "✓ Registrar pago",
-    });
-    return;
-  }
-
-  if (moduloNormalizado === "lavadero") {
-    const orden = await apiFetch(`/api/lavadero/${id}`);
-
-    cobroServicioActual = {
-      ...configBase,
-      endpoint: `/api/lavadero/${id}/pago`,
-      successMessage: "Pago de lavado registrado correctamente.",
-      buildBody: ({ metodoPago, detallePago }) => ({
-        metodo_pago: metodoPago,
-        detalle_pago: detallePago,
-      }),
-    };
-
-    populateCobroServicioModal({
-      title: "Registrar pago pendiente de lavadero",
-      placa: orden.placa || orden.vehiculo_placa || "—",
-      tipo: orden.tipo_lavado_nombre || orden.tipo_lavado || "Lavado",
-      responsable: orden.lavador_nombre || orden.empleado_nombre || "Sin asignar",
-      estado: orden.estado || "Pendiente",
-      cliente: orden.cliente_nombre || "No registrado",
-      inicio: formatDateTime(orden.hora_inicio),
-      fin: formatDateTime(orden.hora_fin),
-      tiempo: formatDuration(orden.hora_inicio, orden.hora_fin || new Date()),
-      valor: orden.precio || 0,
-      actionLabel: "✓ Registrar pago",
-    });
-    return;
-  }
-
-  const data = await apiFetch(`/api/taller/${id}`);
-  const orden = data.orden || data;
+  const servicio = await apiFetch(`/api/pagos/servicio/${encodeURIComponent(moduloNormalizado)}/${encodeURIComponent(id)}`);
 
   cobroServicioActual = {
     ...configBase,
-    endpoint: `/api/taller/${id}/pago`,
-    successMessage: "Pago de taller registrado correctamente.",
-    buildBody: ({ metodoPago, detallePago }) => ({
+    endpoint: "/api/pagos/servicio",
+    buildBody: ({ metodoPago, referencia, detallePago, montoPago }) => ({
+      modulo: moduloNormalizado,
+      referencia_id: Number(id),
+      monto: montoPago,
       metodo_pago: metodoPago,
+      referencia_transaccion: referencia || null,
       detalle_pago: detallePago,
     }),
   };
 
   populateCobroServicioModal({
-    title: "Registrar pago pendiente de taller",
-    placa: orden.placa || "—",
-    tipo: orden.descripcion || orden.descripcion_falla || "Orden de taller",
-    responsable: orden.mecanico_nombre || orden.empleado_nombre || "Sin asignar",
-    estado: orden.estado || "Pendiente",
-    cliente: orden.cliente_nombre || "No registrado",
-    inicio: formatDateTime(orden.fecha_creacion),
-    fin: formatDateTime(orden.fecha_entrega),
-    tiempo: formatDuration(orden.fecha_creacion, orden.fecha_entrega || new Date()),
-    valor: orden.total_general || orden.total_orden || 0,
-    actionLabel: "✓ Registrar pago",
+    title: servicio.monto_pagado > 0
+      ? `Registrar abono a ${formatModuleLabel(moduloNormalizado)}`
+      : `Registrar pago pendiente de ${formatModuleLabel(moduloNormalizado).toLowerCase()}`,
+    placa: servicio.placa || "—",
+    tipo: servicio.detalle || servicio.tipo || "Servicio",
+    responsable: servicio.responsable_nombre || "Caja principal",
+    estado: servicio.estado_cartera || "Pendiente",
+    cliente: servicio.cliente_nombre || "No registrado",
+    inicio: formatDateTime(servicio.inicio),
+    fin: formatDateTime(servicio.fin),
+    tiempo: formatDuration(servicio.inicio, servicio.fin || new Date()),
+    valor: servicio.monto || 0,
+    pagado: servicio.monto_pagado || 0,
+    saldo: servicio.saldo_pendiente || servicio.monto || 0,
+    montoSugerido: servicio.saldo_pendiente || servicio.monto || 0,
+    allowPartial: true,
+    actionLabel: servicio.monto_pagado > 0 ? "✓ Registrar abono" : "✓ Registrar pago",
   });
 }
 
@@ -985,7 +1051,8 @@ async function confirmarCobroServicio() {
   }
 
   const metodoPago = document.getElementById("cobro-metodo-pago").value.trim();
-  if (!metodoPago) {
+  const requiereMetodo = cobroServicioActual.requirePaymentMethod !== false;
+  if (requiereMetodo && !metodoPago) {
     alert("Debe seleccionar un método de pago.");
     return;
   }
@@ -993,12 +1060,19 @@ async function confirmarCobroServicio() {
   const referencia = document.getElementById("cobro-referencia").value.trim();
   const detalle = document.getElementById("cobro-detalle-pago").value.trim();
   const observaciones = document.getElementById("cobro-observaciones").value.trim();
+  const montoPago = Number(document.getElementById("cobro-monto-pago")?.value || 0);
 
   const detallePago = buildCobroDetallePayload({
     referencia,
     detalle,
     observaciones,
   });
+
+  const requiereMonto = cobroServicioActual.buildBody && cobroServicioActual.requireAmount !== false;
+  if (requiereMonto && (!Number.isFinite(montoPago) || montoPago <= 0)) {
+    alert("Debe ingresar un monto válido para registrar el pago.");
+    return;
+  }
 
   try {
     const body = cobroServicioActual.buildBody
@@ -1008,6 +1082,7 @@ async function confirmarCobroServicio() {
           detalle,
           observaciones,
           detallePago,
+          montoPago,
         })
       : {
           estado: cobroServicioActual.estadoFinal,
@@ -1015,13 +1090,15 @@ async function confirmarCobroServicio() {
           detalle_pago: detallePago,
         };
 
-    await apiFetch(cobroServicioActual.endpoint, {
+    const response = await apiFetch(cobroServicioActual.endpoint, {
       method: cobroServicioActual.method || "PATCH",
       body: JSON.stringify(body),
     });
 
     const successMessageId = cobroServicioActual.successMessageId;
-    const successMessage = cobroServicioActual.successMessage;
+    const successMessage = typeof cobroServicioActual.successMessageResolver === "function"
+      ? cobroServicioActual.successMessageResolver(response)
+      : cobroServicioActual.successMessage;
     const reload = cobroServicioActual.reload;
 
     cerrarModalCobroServicio();
@@ -1559,7 +1636,7 @@ function getBadgeClass(value, kind = "status") {
     return "badge badge-success";
   }
 
-  if (["pendiente", "en-proceso", "en-curso", "iniciado", "abierto"].includes(normalized)) {
+  if (["abonado", "pendiente", "en-proceso", "en-curso", "iniciado", "abierto"].includes(normalized)) {
     return "badge badge-warning";
   }
 
@@ -1764,12 +1841,21 @@ async function handleSalidaClick(event) {
 
     // 3) Limpiar campos de pago
     document.getElementById("pq-metodo-pago").value =
-      preCalculo.tipo_servicio === "MENSUALIDAD" || Number(preCalculo.valor_a_cobrar || 0) === 0
+      preCalculo.tipo_servicio === "MENSUALIDAD"
         ? "MENSUALIDAD"
         : "";
     document.getElementById("pq-referencia").value = "";
     document.getElementById("pq-detalle-pago").value = "";
     document.getElementById("pq-obs-salida").value = "";
+    configureSalidaMonto({
+      total: Number(preCalculo.valor_a_cobrar || 0),
+      esMensualidad: preCalculo.tipo_servicio === "MENSUALIDAD",
+    });
+    actualizarCamposPagoServicio(
+      "pq-metodo-pago",
+      "pq-referencia-group",
+      "pq-detalle-pago-group"
+    );
 
     // Limpiar form de edición
     document.getElementById("edit-placa").value = preCalculo.placa || "";
@@ -1839,6 +1925,12 @@ async function guardarEdicionRegistro() {
     document.getElementById("salida-placa").textContent = preCalculo.placa || "—";
     document.getElementById("salida-tipo").textContent = preCalculo.tipo_vehiculo || "—";
     document.getElementById("salida-cliente").textContent = preCalculo.cliente || "—";
+    document.getElementById("salida-valor").textContent =
+      `$${Number(preCalculo.valor_a_cobrar || 0).toLocaleString("es-CO")} COP`;
+    configureSalidaMonto({
+      total: Number(preCalculo.valor_a_cobrar || 0),
+      esMensualidad: preCalculo.tipo_servicio === "MENSUALIDAD",
+    });
 
     document.getElementById("salida-editar").hidden = true;
   } catch (err) {
@@ -1854,8 +1946,23 @@ async function confirmarSalida() {
   }
 
   const metodoPago = document.getElementById("pq-metodo-pago").value.trim();
-  if (!metodoPago) {
+  const totalCobro = Number(datosPreSalida.valor_a_cobrar || 0);
+  const esMensualidad = String(datosPreSalida.tipo_servicio || "").toUpperCase() === "MENSUALIDAD";
+  const requiereCobro = !esMensualidad && totalCobro > 0;
+  const montoPago = Number(document.getElementById("pq-monto-pago")?.value || 0);
+
+  if (requiereCobro && !metodoPago) {
     alert("Debe seleccionar un método de pago.");
+    return;
+  }
+
+  if (requiereCobro && (!Number.isFinite(montoPago) || montoPago <= 0)) {
+    alert("Debe ingresar un monto válido para registrar el cobro.");
+    return;
+  }
+
+  if (requiereCobro && montoPago - totalCobro > 0.01) {
+    alert("El monto a registrar no puede superar el valor pendiente.");
     return;
   }
 
@@ -1864,17 +1971,26 @@ async function confirmarSalida() {
   const observacionesSalida = document.getElementById("pq-obs-salida").value.trim() || null;
 
   try {
-    await apiFetch(`/api/parqueadero/salida/${registroId}`, {
+    const payload = {
+      referencia_transaccion: referencia,
+      detalle_pago: detallePago,
+      observaciones: observacionesSalida,
+    };
+
+    if (metodoPago) {
+      payload.metodo_pago = metodoPago;
+    }
+
+    if (requiereCobro) {
+      payload.monto_pago = montoPago;
+    }
+
+    const response = await apiFetch(`/api/parqueadero/salida/${registroId}`, {
       method: "POST",
-      body: JSON.stringify({
-        metodo_pago: metodoPago,
-        referencia_transaccion: referencia,
-        detalle_pago: detallePago,
-        observaciones: observacionesSalida,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    alert("✓ Salida registrada correctamente y pago confirmado.");
+    alert(response?.mensaje || "✓ Salida registrada correctamente.");
     cerrarModalSalida();
 
     // Recargar tabla de activos
@@ -2146,6 +2262,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     .getElementById("licencia-empresa-id")
     ?.addEventListener("change", () => syncLicenciaEmpresaForm());
 
+  document
+    .getElementById("form-suscripcion-saas")
+    ?.addEventListener("submit", handleGuardarSuscripcionSaas);
+
+  document
+    .getElementById("suscripcion-empresa-id")
+    ?.addEventListener("change", () => syncSuscripcionSaasForm());
+
+  document
+    .getElementById("suscripcion-plan-id")
+    ?.addEventListener("change", () => {
+      const licencia = getLicenciaById(document.getElementById("suscripcion-plan-id")?.value);
+      if (licencia) {
+        document.getElementById("suscripcion-precio-plan").value = String(Math.round(Number(licencia.precio || 0)));
+      }
+    });
+
+  document
+    .getElementById("btn-suscripcion-renovar")
+    ?.addEventListener("click", handleRenovarSuscripcionSaas);
+
+  document
+    .getElementById("btn-suscripcion-suspender")
+    ?.addEventListener("click", () => handleCambiarEstadoSuscripcionSaas("SUSPENDIDA"));
+
+  document
+    .getElementById("btn-suscripcion-cancelar")
+    ?.addEventListener("click", () => handleCambiarEstadoSuscripcionSaas("CANCELADA"));
+
+  document
+    .getElementById("form-factura-saas")
+    ?.addEventListener("submit", handleRegistrarFacturaSaas);
+
   // Usuarios del sistema
   document
     .getElementById("form-usuario-sistema")
@@ -2257,6 +2406,9 @@ async function initAfterLogin() {
 ======================================================*/
 let empresasAdminData = [];
 let licenciasCatalogoData = [];
+let suscripcionesAdminData = [];
+let saasResumenData = null;
+let facturasSaasData = [];
 
 function formatDateForInput(value) {
   if (!value) return "";
@@ -2320,6 +2472,24 @@ function getLicenciaForEmpresa(empresa = {}) {
   return licenciasCatalogoData.find((licencia) => normalizeRole(licencia.nombre) === licenciaTipo);
 }
 
+function getSuscripcionForEmpresa(empresa = {}) {
+  return suscripcionesAdminData.find((suscripcion) => Number(suscripcion.empresa_id) === Number(empresa.id));
+}
+
+function renderSaasSummary(resumen = null) {
+  const data = resumen || {
+    mrr: 0,
+    arr: 0,
+    trial: 0,
+    vencidas: 0,
+  };
+
+  setElementText("saas-total-mrr", formatMoney(Number(data.mrr || 0)));
+  setElementText("saas-total-arr", formatMoney(Number(data.arr || 0)));
+  setElementText("saas-total-trial", Number(data.trial || 0));
+  setElementText("saas-total-vencidas", Number(data.vencidas || 0));
+}
+
 function populateLicenciaPlanSelect() {
   const select = document.getElementById("licencia-plan-id");
   if (!select) return;
@@ -2338,6 +2508,24 @@ function populateLicenciaEmpresaSelect() {
   `).join("");
 }
 
+function populateSuscripcionEmpresaSelect() {
+  const select = document.getElementById("suscripcion-empresa-id");
+  if (!select) return;
+
+  select.innerHTML = empresasAdminData.map((empresa) => `
+    <option value="${empresa.id}">${empresa.nombre}</option>
+  `).join("");
+}
+
+function populateSuscripcionPlanSelect() {
+  const select = document.getElementById("suscripcion-plan-id");
+  if (!select) return;
+
+  select.innerHTML = licenciasCatalogoData.map((licencia) => `
+    <option value="${licencia.id}">${licencia.nombre} - ${formatMoney(licencia.precio || 0)}</option>
+  `).join("");
+}
+
 function renderLicenciaPlanModulos() {
   const panel = document.getElementById("licencia-plan-modulos");
   if (!panel) return;
@@ -2353,6 +2541,110 @@ function renderLicenciaPlanModulos() {
   panel.innerHTML = modulos
     .map((modulo) => `<span class="badge badge-teal">${modulo.nombre}</span>`)
     .join("");
+}
+
+function renderFacturasSaasTable() {
+  const tbody = document.getElementById("facturas-saas-tbody");
+  const empty = document.getElementById("facturas-saas-empty");
+  if (!tbody || !empty) return;
+
+  tbody.innerHTML = "";
+  if (!facturasSaasData.length) {
+    empty.hidden = false;
+    return;
+  }
+
+  empty.hidden = true;
+  tbody.innerHTML = facturasSaasData.map((factura) => `
+    <tr>
+      <td>
+        <strong>${factura.numero_factura || "-"}</strong>
+        <span class="table-subtext">${formatDisplayDate(factura.fecha_emision)}</span>
+      </td>
+      <td>${factura.concepto || "-"}</td>
+      <td>${formatDisplayDate(factura.periodo_inicio)} - ${formatDisplayDate(factura.periodo_fin)}</td>
+      <td>${formatMoney(Number(factura.total || 0))}</td>
+      <td>${renderBadge(factura.estado || "PENDIENTE")}</td>
+      <td>${factura.metodo_pago || factura.referencia_pago || "-"}</td>
+    </tr>
+  `).join("");
+}
+
+async function cargarFacturasSaas(empresaId) {
+  const empresaIdNum = Number(empresaId || 0);
+  facturasSaasData = [];
+  renderFacturasSaasTable();
+
+  if (!empresaIdNum) return;
+
+  try {
+    facturasSaasData = await apiFetch(`/api/suscripciones/${empresaIdNum}/facturas`);
+    renderFacturasSaasTable();
+  } catch (error) {
+    facturasSaasData = [];
+    renderFacturasSaasTable();
+    showMessage("factura-saas-msg", error.message, true);
+  }
+}
+
+async function syncSuscripcionSaasForm(empresaId = null) {
+  const selectEmpresa = document.getElementById("suscripcion-empresa-id");
+  const selectPlan = document.getElementById("suscripcion-plan-id");
+  if (!selectEmpresa || !selectPlan) return;
+
+  if (empresaId) {
+    selectEmpresa.value = String(empresaId);
+  }
+
+  const empresa = empresasAdminData.find((item) => Number(item.id) === Number(selectEmpresa.value));
+  const suscripcion = getSuscripcionForEmpresa(empresa || {});
+  const licencia = suscripcion?.licencia_id
+    ? getLicenciaById(suscripcion.licencia_id)
+    : getLicenciaForEmpresa(empresa || {});
+
+  if (licencia) {
+    selectPlan.value = String(licencia.id);
+  }
+
+  document.getElementById("suscripcion-estado").value = suscripcion?.estado_real || (licencia?.nombre === "Demo" ? "TRIAL" : "ACTIVA");
+  document.getElementById("suscripcion-pasarela").value = suscripcion?.pasarela || "MANUAL";
+  document.getElementById("suscripcion-fecha-inicio").value = formatDateForInput(
+    suscripcion?.fecha_inicio || empresa?.licencia_asignacion_inicio || empresa?.licencia_inicio || new Date()
+  );
+  document.getElementById("suscripcion-fecha-fin").value = formatDateForInput(
+    suscripcion?.fecha_fin || empresa?.licencia_asignacion_fin || empresa?.licencia_fin
+  );
+  document.getElementById("suscripcion-precio-plan").value = String(
+    Math.round(Number(suscripcion?.precio_plan ?? licencia?.precio ?? 0))
+  );
+  document.getElementById("suscripcion-referencia-externa").value = suscripcion?.referencia_externa || "";
+  document.getElementById("suscripcion-renovacion-automatica").checked = Boolean(suscripcion?.renovacion_automatica);
+  document.getElementById("suscripcion-observaciones").value = suscripcion?.observaciones || "";
+
+  setElementText(
+    "suscripcion-estado-actual",
+    empresa
+      ? `${empresa.nombre} · ${suscripcion?.estado_real || "SIN SUSCRIPCION"}`
+      : "Sin suscripción"
+  );
+  setElementText(
+    "facturas-saas-empresa-actual",
+    empresa
+      ? `${empresa.nombre}${suscripcion?.licencia_nombre ? ` · ${suscripcion.licencia_nombre}` : ""}`
+      : "Sin empresa"
+  );
+
+  document.getElementById("factura-saas-total").value = String(
+    Math.round(Number(suscripcion?.precio_plan ?? licencia?.precio ?? 0))
+  );
+  document.getElementById("factura-saas-periodo-inicio").value = formatDateForInput(
+    suscripcion?.fecha_inicio || new Date()
+  );
+  document.getElementById("factura-saas-periodo-fin").value = formatDateForInput(
+    suscripcion?.fecha_fin
+  );
+
+  await cargarFacturasSaas(empresa?.id);
 }
 
 function syncLicenciaEmpresaForm(empresaId = null) {
@@ -2414,11 +2706,16 @@ function renderEmpresasTable() {
   empty.hidden = true;
   tbody.innerHTML = empresas.map((empresa) => {
     const licencia = getLicenciaForEmpresa(empresa);
+    const suscripcion = getSuscripcionForEmpresa(empresa);
     const licenciaNombre = licencia?.nombre || empresa.licencia_nombre || empresa.licencia_tipo || "demo";
     const licenciaFinRaw = empresa.licencia_asignacion_fin || empresa.licencia_fin;
     const licenciaFin = licenciaFinRaw
       ? new Date(licenciaFinRaw).toLocaleDateString()
       : "Sin vencimiento";
+    const suscripcionEstado = suscripcion?.estado_real || "SIN SUSCRIPCION";
+    const suscripcionFin = suscripcion?.fecha_fin
+      ? new Date(suscripcion.fecha_fin).toLocaleDateString()
+      : "Sin fecha";
     const nextState = empresa.activa ? "false" : "true";
     const nextLabel = empresa.activa ? "Desactivar" : "Activar";
     const nextClass = empresa.activa ? "btn-danger" : "btn-success";
@@ -2439,11 +2736,16 @@ function renderEmpresasTable() {
           <span class="badge badge-primary">${licenciaNombre}</span>
           <span class="table-subtext">${licenciaFin}</span>
         </td>
+        <td>
+          ${renderBadge(suscripcionEstado)}
+          <span class="table-subtext">${suscripcionFin}</span>
+        </td>
         <td>${renderBadge(empresa.activa ? "Activa" : "Inactiva")}</td>
         <td>
           <div class="table-actions">
             <button type="button" class="btn btn-sm btn-secondary" onclick="editarEmpresaAdmin(${empresa.id})">Editar</button>
             <button type="button" class="btn btn-sm btn-secondary" onclick="editarLicenciaEmpresa(${empresa.id})">Licencia</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="syncSuscripcionSaasForm(${empresa.id})">SaaS</button>
             <button type="button" class="btn btn-sm ${nextClass}" onclick="toggleEmpresaAdmin(${empresa.id}, ${nextState})">${nextLabel}</button>
           </div>
         </td>
@@ -2454,15 +2756,31 @@ function renderEmpresasTable() {
 
 async function cargarEmpresas() {
   try {
-    await cargarLicenciasCatalogo();
-    empresasAdminData = await apiFetch("/api/empresas");
+    const [, empresas, suscripciones, resumen] = await Promise.all([
+      cargarLicenciasCatalogo(),
+      apiFetch("/api/empresas"),
+      apiFetch("/api/suscripciones"),
+      apiFetch("/api/suscripciones/resumen"),
+    ]);
+    empresasAdminData = empresas;
+    suscripcionesAdminData = suscripciones;
+    saasResumenData = resumen;
     populateLicenciaEmpresaSelect();
+    populateSuscripcionEmpresaSelect();
+    populateSuscripcionPlanSelect();
     syncLicenciaEmpresaForm();
+    await syncSuscripcionSaasForm();
     renderEmpresasSummary(empresasAdminData);
+    renderSaasSummary(saasResumenData);
     renderEmpresasTable();
   } catch (error) {
     empresasAdminData = [];
+    suscripcionesAdminData = [];
+    saasResumenData = null;
+    facturasSaasData = [];
     renderEmpresasSummary([]);
+    renderSaasSummary(null);
+    renderFacturasSaasTable();
     renderEmpresasTable();
     showMessage("empresa-admin-msg", error.message, true);
   }
@@ -2568,6 +2886,141 @@ async function handleAsignarLicenciaEmpresa(event) {
     syncLicenciaEmpresaForm(empresaId);
   } catch (error) {
     showMessage("licencia-empresa-msg", error.message, true);
+  }
+}
+
+async function handleGuardarSuscripcionSaas(event) {
+  event.preventDefault();
+
+  const empresaId = Number(document.getElementById("suscripcion-empresa-id")?.value || 0);
+  const licenciaId = Number(document.getElementById("suscripcion-plan-id")?.value || 0);
+
+  if (!empresaId || !licenciaId) {
+    showMessage("suscripcion-saas-msg", "Selecciona empresa y plan.", true);
+    return;
+  }
+
+  try {
+    await apiFetch("/api/suscripciones/upsert", {
+      method: "POST",
+      body: JSON.stringify({
+        empresa_id: empresaId,
+        licencia_id: licenciaId,
+        estado: document.getElementById("suscripcion-estado")?.value || "ACTIVA",
+        fecha_inicio: document.getElementById("suscripcion-fecha-inicio")?.value || null,
+        fecha_fin: document.getElementById("suscripcion-fecha-fin")?.value || null,
+        precio_plan: Number(document.getElementById("suscripcion-precio-plan")?.value || 0),
+        pasarela: document.getElementById("suscripcion-pasarela")?.value || "MANUAL",
+        referencia_externa: document.getElementById("suscripcion-referencia-externa")?.value.trim() || null,
+        renovacion_automatica: document.getElementById("suscripcion-renovacion-automatica")?.checked || false,
+        observaciones: document.getElementById("suscripcion-observaciones")?.value.trim() || null,
+      }),
+    });
+
+    showMessage("suscripcion-saas-msg", "Suscripción guardada correctamente.");
+    await cargarEmpresas();
+    await syncSuscripcionSaasForm(empresaId);
+  } catch (error) {
+    showMessage("suscripcion-saas-msg", error.message, true);
+  }
+}
+
+async function handleRenovarSuscripcionSaas() {
+  const empresaId = Number(document.getElementById("suscripcion-empresa-id")?.value || 0);
+  if (!empresaId) {
+    showMessage("suscripcion-saas-msg", "Selecciona una empresa para renovar.", true);
+    return;
+  }
+
+  try {
+    await apiFetch(`/api/suscripciones/${empresaId}/renovar`, {
+      method: "POST",
+      body: JSON.stringify({
+        dias: 30,
+        licencia_id: Number(document.getElementById("suscripcion-plan-id")?.value || 0),
+        pasarela: document.getElementById("suscripcion-pasarela")?.value || "MANUAL",
+        total: Number(document.getElementById("suscripcion-precio-plan")?.value || 0),
+        metodo_pago: document.getElementById("factura-saas-metodo")?.value.trim() || null,
+        referencia_pago: document.getElementById("factura-saas-referencia")?.value.trim() || null,
+      }),
+    });
+
+    showMessage("suscripcion-saas-msg", "Suscripción renovada por 30 días.");
+    await cargarEmpresas();
+    await syncSuscripcionSaasForm(empresaId);
+  } catch (error) {
+    showMessage("suscripcion-saas-msg", error.message, true);
+  }
+}
+
+async function handleCambiarEstadoSuscripcionSaas(estado) {
+  const empresaId = Number(document.getElementById("suscripcion-empresa-id")?.value || 0);
+  if (!empresaId) {
+    showMessage("suscripcion-saas-msg", "Selecciona una empresa.", true);
+    return;
+  }
+
+  const mensaje = estado === "SUSPENDIDA"
+    ? "¿Deseas suspender esta suscripción?"
+    : "¿Deseas cancelar esta suscripción?";
+  if (!confirm(mensaje)) return;
+
+  try {
+    await apiFetch(`/api/suscripciones/${empresaId}/estado`, {
+      method: "POST",
+      body: JSON.stringify({
+        estado,
+        observaciones: document.getElementById("suscripcion-observaciones")?.value.trim() || null,
+      }),
+    });
+
+    showMessage("suscripcion-saas-msg", `Suscripción ${estado.toLowerCase()} correctamente.`);
+    await cargarEmpresas();
+    await syncSuscripcionSaasForm(empresaId);
+  } catch (error) {
+    showMessage("suscripcion-saas-msg", error.message, true);
+  }
+}
+
+async function handleRegistrarFacturaSaas(event) {
+  event.preventDefault();
+
+  const empresaId = Number(document.getElementById("suscripcion-empresa-id")?.value || 0);
+  if (!empresaId) {
+    showMessage("factura-saas-msg", "Selecciona una empresa.", true);
+    return;
+  }
+
+  const total = Number(document.getElementById("factura-saas-total")?.value || 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    showMessage("factura-saas-msg", "El total de la factura debe ser mayor a cero.", true);
+    return;
+  }
+
+  const impuestos = Number(document.getElementById("factura-saas-impuestos")?.value || 0);
+  const subtotal = Math.max(total - impuestos, 0);
+
+  try {
+    await apiFetch(`/api/suscripciones/${empresaId}/facturas`, {
+      method: "POST",
+      body: JSON.stringify({
+        concepto: document.getElementById("factura-saas-concepto")?.value.trim() || "Cobro de suscripción SaaS",
+        periodo_inicio: document.getElementById("factura-saas-periodo-inicio")?.value || null,
+        periodo_fin: document.getElementById("factura-saas-periodo-fin")?.value || null,
+        subtotal,
+        impuestos,
+        total,
+        estado: document.getElementById("factura-saas-estado")?.value || "PAGADA",
+        fecha_vencimiento: document.getElementById("factura-saas-vencimiento")?.value || null,
+        metodo_pago: document.getElementById("factura-saas-metodo")?.value.trim() || null,
+        referencia_pago: document.getElementById("factura-saas-referencia")?.value.trim() || null,
+      }),
+    });
+
+    showMessage("factura-saas-msg", "Factura SaaS registrada correctamente.");
+    await syncSuscripcionSaasForm(empresaId);
+  } catch (error) {
+    showMessage("factura-saas-msg", error.message, true);
   }
 }
 
@@ -2802,7 +3255,7 @@ function setConfigTab(tab = "empresa") {
   document.querySelectorAll(".config-tab").forEach((button) => {
     const active = button.dataset.configTab === selectedTab;
     button.classList.toggle("active", active);
-    button.setAttribute("aria-selected", active ? "true" : "false");
+    button.setAttribute("aria-pressed", active ? "true" : "false");
   });
 
   document.querySelectorAll("[data-config-panel]").forEach((panel) => {
@@ -3977,8 +4430,12 @@ function iniciarMensualidadVehiculo360() {
 function getWalletStatus(resumen = {}) {
   const pendiente = toClientNumber(resumen.total_pendiente);
   const enCurso = toClientNumber(resumen.total_en_curso);
+  const abonado = toClientNumber(resumen.total_abonado);
 
   if (pendiente > 0) {
+    if (abonado > 0) {
+      return { label: "Con saldo", className: "badge-warning" };
+    }
     return { label: "Pendiente", className: "badge-danger" };
   }
   if (enCurso > 0) {
@@ -3992,9 +4449,9 @@ function renderCarteraActions(item, mode = "pendientes") {
   const referenciaId = escapeHtml(item.referencia_id || "");
   const acciones = [];
 
-  if (mode !== "pagos" && item.estado_cartera === "PENDIENTE" && modulo && referenciaId) {
+  if (mode !== "pagos" && ["PENDIENTE", "ABONADO"].includes(item.estado_cartera) && modulo && referenciaId) {
     acciones.push(
-      `<button type="button" class="btn btn-sm btn-primary" onclick="abrirPagoPendiente('${modulo}','${referenciaId}')">Cobrar</button>`
+      `<button type="button" class="btn btn-sm btn-primary" onclick="abrirPagoPendiente('${modulo}','${referenciaId}')">${item.estado_cartera === "ABONADO" ? "Abonar" : "Cobrar"}</button>`
     );
   }
 
@@ -4019,7 +4476,12 @@ function renderCarteraRows(tbodyId, emptyId, rows, mode = "pendientes") {
       <td>${formatDateTime(item.fecha)}</td>
       <td><span class="badge ${getModuleBadgeClass(item.tipo)}">${escapeHtml(item.tipo || "Servicio")}</span></td>
       <td>${escapeHtml(item.placa || "N/A")}</td>
-      <td>${formatMoney(toClientNumber(item.monto))}</td>
+      <td>
+        <strong>${formatMoney(toClientNumber(mode === "pagos" ? item.monto : (item.saldo_pendiente ?? item.monto)))}</strong>
+        ${mode === "pagos"
+          ? ""
+          : `<span class="table-subtext">Total ${formatMoney(toClientNumber(item.monto))} · Pagado ${formatMoney(toClientNumber(item.monto_pagado || 0))}</span>`}
+      </td>
       <td>${mode === "pagos" ? renderBadge(item.metodo_pago || item.estado_cartera, "payment") : renderBadge(item.estado_cartera)}</td>
       <td>${renderCarteraActions(item, mode)}</td>
     </tr>
@@ -5238,7 +5700,10 @@ function renderCajaPendientes(pendientes = []) {
         <span class="table-subtext">${escapeHtml(item.placa || item.concepto || "Sin placa")}</span>
       </td>
       <td>${escapeHtml(item.cliente_nombre || item.responsable_nombre || "No registrado")}</td>
-      <td><strong>${formatMoney(item.monto || 0)}</strong></td>
+      <td>
+        <strong>${formatMoney(item.saldo_pendiente || item.monto || 0)}</strong>
+        <span class="table-subtext">Total ${formatMoney(item.monto || 0)} · Pagado ${formatMoney(item.monto_pagado || 0)}</span>
+      </td>
       <td>
         <div class="table-actions">
           <button
@@ -5246,7 +5711,7 @@ function renderCajaPendientes(pendientes = []) {
             class="btn btn-sm btn-primary"
             onclick="abrirPagoPendiente('${escapeHtml(item.modulo || "")}','${escapeHtml(item.referencia_id || "")}')"
           >
-            Cobrar
+            ${item.monto_pagado > 0 ? "Abonar" : "Cobrar"}
           </button>
         </div>
       </td>
@@ -5271,7 +5736,7 @@ function renderCajaMovimientos(movimientos = []) {
       </td>
       <td>${renderBadge(formatCashMethod(item.metodo_pago), "payment")}</td>
       <td>
-        <strong>${formatMoney(item.monto || 0)}</strong>
+        <strong>${formatMoney((item.estado_caja === "PENDIENTE" || item.estado_caja === "ABONADO") ? (item.saldo_pendiente || item.monto || 0) : (item.monto_pagado || item.monto || 0))}</strong>
         <span class="table-subtext">${escapeHtml(item.estado_caja || "PAGADO")}</span>
       </td>
     </tr>

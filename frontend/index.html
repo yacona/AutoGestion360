@@ -2030,6 +2030,32 @@
               </div>
             </div>
 
+            <div class="card card-full companies-hero-card">
+              <div>
+                <span class="eyebrow">Facturación SaaS</span>
+                <h3>Estado comercial</h3>
+                <p class="small-text">Controla ingresos recurrentes, trials, vencimientos y bloqueo operativo por suscripción.</p>
+              </div>
+              <div class="company-summary-grid">
+                <div>
+                  <span class="stat-label">MRR</span>
+                  <strong id="saas-total-mrr" class="stat-value">$0</strong>
+                </div>
+                <div>
+                  <span class="stat-label">ARR</span>
+                  <strong id="saas-total-arr" class="stat-value">$0</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Trials</span>
+                  <strong id="saas-total-trial" class="stat-value">0</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Vencidas</span>
+                  <strong id="saas-total-vencidas" class="stat-value">0</strong>
+                </div>
+              </div>
+            </div>
+
             <div class="card card-full company-form-card">
               <div class="form-card-heading">
                 <div>
@@ -2171,6 +2197,172 @@
               </form>
             </div>
 
+            <div class="card card-full company-form-card">
+              <div class="form-card-heading">
+                <div>
+                  <h3>Suscripción SaaS</h3>
+                  <p class="small-text">Gestiona estado comercial, renovación y referencia externa del tenant seleccionado.</p>
+                </div>
+                <div id="suscripcion-estado-actual" class="license-current">Sin suscripción</div>
+              </div>
+
+              <form id="form-suscripcion-saas">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="suscripcion-empresa-id">Empresa *</label>
+                    <select id="suscripcion-empresa-id" required></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="suscripcion-plan-id">Plan *</label>
+                    <select id="suscripcion-plan-id" required></select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="suscripcion-estado">Estado *</label>
+                    <select id="suscripcion-estado">
+                      <option value="TRIAL">TRIAL</option>
+                      <option value="ACTIVA">ACTIVA</option>
+                      <option value="VENCIDA">VENCIDA</option>
+                      <option value="SUSPENDIDA">SUSPENDIDA</option>
+                      <option value="CANCELADA">CANCELADA</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="suscripcion-pasarela">Pasarela</label>
+                    <select id="suscripcion-pasarela">
+                      <option value="MANUAL">MANUAL</option>
+                      <option value="STRIPE">STRIPE</option>
+                      <option value="WOMPI">WOMPI</option>
+                      <option value="MERCADOPAGO">MERCADOPAGO</option>
+                      <option value="PAYU">PAYU</option>
+                      <option value="OTRO">OTRO</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="suscripcion-fecha-inicio">Inicio</label>
+                    <input type="date" id="suscripcion-fecha-inicio" />
+                  </div>
+                  <div class="form-group">
+                    <label for="suscripcion-fecha-fin">Fin</label>
+                    <input type="date" id="suscripcion-fecha-fin" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="suscripcion-precio-plan">Precio mensual</label>
+                    <input type="number" id="suscripcion-precio-plan" min="0" step="100" />
+                  </div>
+                  <div class="form-group">
+                    <label for="suscripcion-referencia-externa">Referencia externa</label>
+                    <input type="text" id="suscripcion-referencia-externa" placeholder="Ej: sub_12345 o acuerdo comercial" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label class="checkbox-row">
+                    <input type="checkbox" id="suscripcion-renovacion-automatica" />
+                    <span>Renovación automática</span>
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label for="suscripcion-observaciones">Observaciones</label>
+                  <textarea id="suscripcion-observaciones" rows="2" placeholder="Notas operativas o comerciales de la cuenta"></textarea>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Guardar suscripción</button>
+                  <button type="button" id="btn-suscripcion-renovar" class="btn btn-secondary">Renovar 30 días</button>
+                  <button type="button" id="btn-suscripcion-suspender" class="btn btn-secondary">Suspender</button>
+                  <button type="button" id="btn-suscripcion-cancelar" class="btn btn-danger">Cancelar</button>
+                </div>
+                <div id="suscripcion-saas-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <div class="card card-full company-form-card">
+              <div class="form-card-heading">
+                <div>
+                  <h3>Facturas SaaS</h3>
+                  <p class="small-text">Registra cobros del plan y consulta el historial reciente de la empresa seleccionada.</p>
+                </div>
+                <div id="facturas-saas-empresa-actual" class="license-current">Sin empresa</div>
+              </div>
+
+              <form id="form-factura-saas">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="factura-saas-concepto">Concepto *</label>
+                    <input type="text" id="factura-saas-concepto" value="Cobro de suscripción SaaS" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="factura-saas-estado">Estado</label>
+                    <select id="factura-saas-estado">
+                      <option value="PAGADA">PAGADA</option>
+                      <option value="PENDIENTE">PENDIENTE</option>
+                      <option value="VENCIDA">VENCIDA</option>
+                      <option value="ANULADA">ANULADA</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="factura-saas-periodo-inicio">Periodo inicio</label>
+                    <input type="date" id="factura-saas-periodo-inicio" />
+                  </div>
+                  <div class="form-group">
+                    <label for="factura-saas-periodo-fin">Periodo fin</label>
+                    <input type="date" id="factura-saas-periodo-fin" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="factura-saas-total">Total *</label>
+                    <input type="number" id="factura-saas-total" min="0" step="100" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="factura-saas-impuestos">Impuestos</label>
+                    <input type="number" id="factura-saas-impuestos" min="0" step="100" value="0" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="factura-saas-vencimiento">Fecha vencimiento</label>
+                    <input type="date" id="factura-saas-vencimiento" />
+                  </div>
+                  <div class="form-group">
+                    <label for="factura-saas-metodo">Método de pago</label>
+                    <input type="text" id="factura-saas-metodo" placeholder="Ej: TRANSFERENCIA" />
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="factura-saas-referencia">Referencia de pago</label>
+                  <input type="text" id="factura-saas-referencia" placeholder="Ej: comprobante, invoice o folio" />
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Registrar factura</button>
+                </div>
+                <div id="factura-saas-msg" class="small-message" hidden></div>
+              </form>
+
+              <div class="table-wrapper mt-3">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Factura</th>
+                      <th>Concepto</th>
+                      <th>Periodo</th>
+                      <th>Total</th>
+                      <th>Estado</th>
+                      <th>Pago</th>
+                    </tr>
+                  </thead>
+                  <tbody id="facturas-saas-tbody"></tbody>
+                </table>
+                <div id="facturas-saas-empty" class="table-empty">No hay facturas SaaS registradas.</div>
+              </div>
+            </div>
+
             <div class="card card-expand">
               <div class="list-heading">
                 <h3>Empresas registradas</h3>
@@ -2190,6 +2382,7 @@
                       <th>Vehículos</th>
                       <th>Parqueados</th>
                       <th>Licencia</th>
+                      <th>Suscripción</th>
                       <th>Estado</th>
                       <th></th>
                     </tr>
@@ -2228,20 +2421,20 @@
                   <strong id="config-summary-modulos">-</strong>
                 </div>
               </div>
-              <div class="config-tabs" role="tablist" aria-label="Secciones de configuración">
-                <button type="button" class="config-tab active" data-config-tab="empresa">
+              <div class="config-tabs" role="toolbar" aria-label="Secciones de configuración">
+                <button type="button" class="config-tab active" data-config-tab="empresa" aria-pressed="true">
                   <span>🏢</span>
                   Empresa
                 </button>
-                <button type="button" class="config-tab" data-config-tab="parqueadero">
+                <button type="button" class="config-tab" data-config-tab="parqueadero" aria-pressed="false">
                   <span>🅿</span>
                   Parqueadero
                 </button>
-                <button type="button" class="config-tab" data-config-tab="licencias">
+                <button type="button" class="config-tab" data-config-tab="licencias" aria-pressed="false">
                   <span>🪪</span>
                   Licencias
                 </button>
-                <button type="button" class="config-tab" data-config-tab="apariencia">
+                <button type="button" class="config-tab" data-config-tab="apariencia" aria-pressed="false">
                   <span>◐</span>
                   Apariencia
                 </button>
@@ -2636,9 +2829,15 @@
 
       <!-- Método de pago (REQUERIDO) -->
       <div class="form-section">
-        <h4>Método de pago *</h4>
+        <h4>Pago</h4>
         <div class="form-group">
-          <select id="pq-metodo-pago" aria-label="Método de pago" title="Método de pago" required>
+          <label for="pq-monto-pago">Monto a registrar</label>
+          <input type="number" id="pq-monto-pago" min="0" step="100" placeholder="Ej: 25000" />
+          <p id="pq-monto-help" class="small-text">Puedes registrar el pago completo o un abono.</p>
+        </div>
+
+        <div class="form-group">
+          <select id="pq-metodo-pago" aria-label="Método de pago" title="Método de pago">
             <option value="">-- Seleccione método de pago --</option>
             <option value="EFECTIVO">💵 Efectivo</option>
             <option value="TARJETA">💳 Tarjeta débito/crédito</option>
@@ -2771,9 +2970,22 @@
         <h4>Cálculo de pago</h4>
         <div class="info-grid">
           <div class="cost-highlight">
-            <strong>VALOR A COBRAR:</strong>
+            <strong>TOTAL DEL SERVICIO:</strong>
             <span id="cobro-servicio-valor" class="money-big"></span>
           </div>
+          <div>
+            <strong>Pagado acumulado:</strong>
+            <span id="cobro-servicio-pagado">$ 0</span>
+          </div>
+          <div>
+            <strong>Saldo pendiente:</strong>
+            <span id="cobro-servicio-saldo">$ 0</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="cobro-monto-pago">Monto a registrar *</label>
+          <input type="number" id="cobro-monto-pago" min="0" step="100" placeholder="Ej: 25000" />
+          <p id="cobro-monto-help" class="small-text">Puedes registrar el pago completo o un abono.</p>
         </div>
       </div>
 

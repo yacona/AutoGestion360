@@ -2,10 +2,13 @@
 const express = require("express");
 const db = require("../db");
 const auth = require("../middleware/auth");
+const {
+  METODOS_PAGO_VALIDOS,
+  registrarPagoServicio,
+  toNumber,
+} = require("../utils/pagos-servicios");
 
 const router = express.Router();
-
-const METODOS_PAGO_VALIDOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "OTRO"];
 
 /* =========================================================
  * TIPOS DE LAVADO
@@ -248,8 +251,15 @@ router.get("/", auth, async (req, res) => {
  */
 router.patch("/:id", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
+  const usuario_id = req.user.id;
   const { id } = req.params;
-  const { estado, metodo_pago, detalle_pago } = req.body || {};
+  const {
+    estado,
+    metodo_pago,
+    detalle_pago,
+    monto_pago,
+    referencia_transaccion,
+  } = req.body || {};
 
   const estadosValidos = ["Pendiente", "En_Proceso", "Completado"];
 
@@ -260,46 +270,114 @@ router.patch("/:id", auth, async (req, res) => {
     });
   }
 
-  if (estado === "Completado" && !metodo_pago) {
-    return res.status(400).json({
-      error: "Debe registrar el método de pago para completar el lavado.",
-    });
-  }
-
   if (metodo_pago && !METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
     return res.status(400).json({
       error: `Método de pago inválido. Opciones válidas: ${METODOS_PAGO_VALIDOS.join(", ")}`,
     });
   }
 
+  let client;
   try {
-    const detalleStr =
-      detalle_pago !== undefined && detalle_pago !== null
-        ? JSON.stringify(detalle_pago)
-        : null;
+    client = await db.connect();
+    await client.query("BEGIN");
 
-    const { rows } = await db.query(
+    const { rows } = await client.query(
       `UPDATE lavadero
        SET estado = $1::varchar,
            hora_fin = CASE
              WHEN $1::text = 'Completado' THEN COALESCE(hora_fin, NOW())
              ELSE hora_fin
-           END,
-           metodo_pago = COALESCE($2::varchar, metodo_pago),
-           detalle_pago = COALESCE($3::jsonb, detalle_pago)
-       WHERE empresa_id = $4 AND id = $5
+           END
+       WHERE empresa_id = $2 AND id = $3
        RETURNING *`,
-      [estado, metodo_pago || null, detalleStr, empresa_id, id]
+      [estado, empresa_id, id]
     );
 
     if (rows.length === 0) {
+      await client.query("ROLLBACK");
+      client.release();
+      client = null;
       return res.status(404).json({ error: "Lavado no encontrado." });
     }
 
-    return res.json(rows[0]);
+    let lavado = rows[0];
+    let pagoResumen = null;
+    const totalServicio = toNumber(lavado.precio);
+    const detalleStr =
+      detalle_pago !== undefined && detalle_pago !== null
+        ? JSON.stringify(detalle_pago)
+        : null;
+
+    if (estado === "Completado" && totalServicio > 0 && !metodo_pago) {
+      await client.query("ROLLBACK");
+      client.release();
+      client = null;
+      return res.status(400).json({
+        error: "Debe registrar el método de pago para completar el lavado.",
+      });
+    }
+
+    if (estado === "Completado" && metodo_pago && totalServicio > 0) {
+      const resultadoPago = await registrarPagoServicio({
+        queryable: client,
+        empresaId: empresa_id,
+        usuarioId: usuario_id,
+        modulo: "lavadero",
+        referenciaId: id,
+        monto: monto_pago,
+        metodoPago: metodo_pago,
+        referenciaTransaccion: referencia_transaccion,
+        detallePago: detalle_pago,
+      });
+
+      pagoResumen = resultadoPago.servicio;
+      const { rows: actualizadoRows } = await client.query(
+        `SELECT * FROM lavadero WHERE empresa_id = $1 AND id = $2 LIMIT 1`,
+        [empresa_id, id]
+      );
+      lavado = actualizadoRows[0] || lavado;
+    } else if (metodo_pago || detalleStr) {
+      const { rows: actualizadoRows } = await client.query(
+        `UPDATE lavadero
+         SET metodo_pago = COALESCE($1::varchar, metodo_pago),
+             detalle_pago = COALESCE($2::jsonb, detalle_pago)
+         WHERE empresa_id = $3 AND id = $4
+         RETURNING *`,
+        [metodo_pago || null, detalleStr, empresa_id, id]
+      );
+      lavado = actualizadoRows[0] || lavado;
+    }
+
+    await client.query("COMMIT");
+    client.release();
+    client = null;
+
+    const mensaje = estado === "Completado"
+      ? pagoResumen
+        ? pagoResumen.estado_cartera === "PAGADO"
+          ? "Lavado completado y pago registrado correctamente."
+          : "Lavado completado. Se registró un abono y quedó saldo pendiente."
+        : "Lavado completado correctamente."
+      : "Lavado actualizado correctamente.";
+
+    return res.json({
+      ...lavado,
+      pago_resumen: pagoResumen,
+      mensaje,
+    });
   } catch (err) {
     console.error("🔥 Error actualizando lavado:", err);
-    return res.status(500).json({ error: "Error actualizando lavado." });
+    try {
+      if (client) {
+        await client.query("ROLLBACK");
+      }
+    } catch (_) {}
+    if (client) {
+      client.release();
+    }
+    return res.status(err.status || 500).json({
+      error: err.message || "Error actualizando lavado.",
+    });
   }
 });
 

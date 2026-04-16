@@ -5,6 +5,7 @@ const db = require('../db');
 const authMiddleware = require('../middleware/auth');
 const { enviarNotificacionLicencia } = require('../utils/email');
 const { ensureLicenciasSchema } = require('../utils/licencias-schema');
+const { upsertSuscripcionEmpresa } = require('../utils/suscripciones-schema');
 
 function normalizeRole(role) {
   return String(role || '')
@@ -279,6 +280,20 @@ router.post('/asignar', authMiddleware, superAdminOnly, async (req, res) => {
          WHERE id = $5`,
         [licencia.nombre, licencia_id, fecha_inicio || null, fecha_fin || null, empresa_id]
       );
+
+      await upsertSuscripcionEmpresa({
+        queryable: client,
+        empresaId: empresa_id,
+        licenciaId: licencia_id,
+        estado: normalizeRole(licencia.nombre) === "demo" ? "TRIAL" : "ACTIVA",
+        fechaInicio: fecha_inicio || null,
+        fechaFin: fecha_fin || null,
+        renovacionAutomatica: false,
+        pasarela: "MANUAL",
+        observaciones: "Sincronizada desde asignacion de licencia",
+        moneda: "COP",
+        precioPlan: licencia.precio,
+      });
 
       await client.query('COMMIT');
 

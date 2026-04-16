@@ -3,6 +3,7 @@ const express = require("express");
 const router = express.Router();
 const db = require("../db");
 const auth = require("../middleware/auth");
+const { ensurePagosServiciosSchema } = require("../utils/pagos-servicios-schema");
 
 // Todas las rutas de reportes requieren autenticación
 router.use(auth);
@@ -48,6 +49,62 @@ function normalizeMetodoPago(value) {
   return metodo || "SIN_METODO";
 }
 
+function buildPagosServiciosJoin(modulo, referenceExpr, alias) {
+  return `
+    LEFT JOIN (
+      SELECT
+        referencia_id,
+        COALESCE(SUM(monto), 0) AS total_pagado,
+        COUNT(*)::int AS cantidad_pagos,
+        COUNT(
+          DISTINCT UPPER(COALESCE(NULLIF(TRIM(metodo_pago), ''), 'SIN_METODO'))
+        )::int AS metodos_distintos,
+        MAX(metodo_pago) FILTER (
+          WHERE NULLIF(TRIM(COALESCE(metodo_pago, '')), '') IS NOT NULL
+        ) AS ultimo_metodo_pago,
+        MAX(fecha_pago) AS ultimo_pago
+      FROM pagos_servicios
+      WHERE empresa_id = $1
+        AND modulo = '${modulo}'
+        AND estado = 'APLICADO'
+      GROUP BY referencia_id
+    ) ${alias} ON ${alias}.referencia_id = ${referenceExpr}
+  `;
+}
+
+function enriquecerMovimientoCaja(movimiento = {}) {
+  const monto = toNumber(movimiento.monto);
+  const totalPagado = Boolean(movimiento.legacy_paid)
+    ? monto
+    : Math.min(monto, toNumber(movimiento.total_pagado_registrado));
+  const saldoPendiente = ["PAGADO", "MENSUALIDAD"].includes(movimiento.estado_caja)
+    ? 0
+    : Math.max(monto - totalPagado, 0);
+
+  let estadoCaja = "PENDIENTE";
+  if (Boolean(movimiento.legacy_paid) || totalPagado >= monto) {
+    estadoCaja = movimiento.estado_original === "MENSUALIDAD" ? "MENSUALIDAD" : "PAGADO";
+  } else if (totalPagado > 0) {
+    estadoCaja = "ABONADO";
+  }
+
+  let metodoPago = String(movimiento.metodo_pago_base || "").trim() || null;
+  if (!metodoPago && totalPagado > 0) {
+    metodoPago = Number(movimiento.metodos_distintos || 0) > 1
+      ? "MIXTO"
+      : String(movimiento.ultimo_metodo_pago || "").trim() || null;
+  }
+
+  return {
+    ...movimiento,
+    monto,
+    monto_pagado: totalPagado,
+    saldo_pendiente: saldoPendiente,
+    estado_caja: estadoCaja,
+    metodo_pago: normalizeMetodoPago(metodoPago || (estadoCaja === "MENSUALIDAD" ? "MENSUALIDAD" : "SIN_METODO")),
+  };
+}
+
 function buildCajaResumen(movimientos) {
   const resumen = {
     total_facturado: 0,
@@ -56,6 +113,7 @@ function buildCajaResumen(movimientos) {
     servicios_total: movimientos.length,
     servicios_pagados: 0,
     servicios_pendientes: 0,
+    servicios_abonados: 0,
   };
 
   const metodos = new Map();
@@ -64,19 +122,27 @@ function buildCajaResumen(movimientos) {
 
   for (const movimiento of movimientos) {
     const monto = toNumber(movimiento.monto);
+    const montoPagado = toNumber(movimiento.monto_pagado);
+    const saldoPendiente = toNumber(movimiento.saldo_pendiente);
     const modulo = movimiento.modulo || "sin_modulo";
     const metodo = normalizeMetodoPago(movimiento.metodo_pago);
     const responsable = movimiento.responsable_nombre || "Sin responsable";
-    const pagado = movimiento.estado_caja === "PAGADO";
+    const pagado = ["PAGADO", "MENSUALIDAD"].includes(movimiento.estado_caja);
+    const abonado = movimiento.estado_caja === "ABONADO";
 
     resumen.total_facturado += monto;
 
     if (pagado) {
       resumen.servicios_pagados += 1;
-      resumen.total_recaudado += monto;
+      resumen.total_recaudado += movimiento.estado_caja === "MENSUALIDAD" ? monto : montoPagado;
+    } else if (abonado) {
+      resumen.servicios_abonados += 1;
+      resumen.servicios_pendientes += 1;
+      resumen.total_recaudado += montoPagado;
+      resumen.total_pendiente += saldoPendiente;
     } else {
       resumen.servicios_pendientes += 1;
-      resumen.total_pendiente += monto;
+      resumen.total_pendiente += saldoPendiente || monto;
     }
 
     const moduloActual = modulos.get(modulo) || {
@@ -92,21 +158,22 @@ function buildCajaResumen(movimientos) {
     moduloActual.facturado += monto;
     if (pagado) {
       moduloActual.pagados += 1;
-      moduloActual.recaudado += monto;
+      moduloActual.recaudado += movimiento.estado_caja === "MENSUALIDAD" ? monto : montoPagado;
     } else {
       moduloActual.pendientes += 1;
-      moduloActual.pendiente += monto;
+      moduloActual.recaudado += montoPagado;
+      moduloActual.pendiente += saldoPendiente || monto;
     }
     modulos.set(modulo, moduloActual);
 
-    if (pagado) {
+    if (pagado || abonado) {
       const metodoActual = metodos.get(metodo) || {
         metodo_pago: metodo,
         cantidad: 0,
         total: 0,
       };
       metodoActual.cantidad += 1;
-      metodoActual.total += monto;
+      metodoActual.total += pagado && movimiento.estado_caja === "MENSUALIDAD" ? monto : montoPagado;
       metodos.set(metodo, metodoActual);
     }
 
@@ -117,10 +184,13 @@ function buildCajaResumen(movimientos) {
       pendiente: 0,
     };
     responsableActual.cantidad += 1;
-    if (pagado) {
-      responsableActual.recaudado += monto;
+    if (pagado || abonado) {
+      responsableActual.recaudado += pagado && movimiento.estado_caja === "MENSUALIDAD" ? monto : montoPagado;
+    }
+    if (!pagado) {
+      responsableActual.pendiente += saldoPendiente || monto;
     } else {
-      responsableActual.pendiente += monto;
+      responsableActual.pendiente += 0;
     }
     responsables.set(responsable, responsableActual);
   }
@@ -469,6 +539,8 @@ router.get("/caja", async (req, res) => {
   const { desdeISO, hastaISO } = obtenerRangoFechas(req.query);
 
   try {
+    await ensurePagosServiciosSchema();
+
     const { rows } = await db.query(
       `
       SELECT *
@@ -480,23 +552,36 @@ router.get("/caja", async (req, res) => {
           p.placa,
           COALESCE(c.nombre, p.nombre_cliente) AS cliente_nombre,
           COALESCE(u.nombre, 'Caja parqueadero') AS responsable_nombre,
-          CASE
-            WHEN UPPER(COALESCE(p.estado_pago, '')) = 'MENSUALIDAD'
-              OR COALESCE(p.valor_total, 0) = 0 THEN 'MENSUALIDAD'
-            ELSE COALESCE(NULLIF(TRIM(p.metodo_pago), ''), 'SIN_METODO')
-          END AS metodo_pago,
+          COALESCE(NULLIF(TRIM(p.metodo_pago), ''), NULL) AS metodo_pago_base,
           COALESCE(p.valor_total, 0) AS monto,
           CASE
             WHEN COALESCE(p.valor_total, 0) = 0
               OR NULLIF(TRIM(COALESCE(p.metodo_pago, '')), '') IS NOT NULL
               OR UPPER(COALESCE(p.estado_pago, '')) IN ('PAGADO', 'MENSUALIDAD')
-            THEN 'PAGADO'
+            THEN CASE
+              WHEN UPPER(COALESCE(p.estado_pago, '')) = 'MENSUALIDAD'
+                OR COALESCE(p.valor_total, 0) = 0 THEN 'MENSUALIDAD'
+              ELSE 'PAGADO'
+            END
             ELSE 'PENDIENTE'
           END AS estado_caja,
+          CASE
+            WHEN COALESCE(p.valor_total, 0) = 0
+              OR NULLIF(TRIM(COALESCE(p.metodo_pago, '')), '') IS NOT NULL
+              OR UPPER(COALESCE(p.estado_pago, '')) IN ('PAGADO', 'MENSUALIDAD')
+            THEN TRUE
+            ELSE FALSE
+          END AS legacy_paid,
+          COALESCE(psp.total_pagado, 0) AS total_pagado_registrado,
+          COALESCE(psp.cantidad_pagos, 0) AS cantidad_pagos,
+          COALESCE(psp.metodos_distintos, 0) AS metodos_distintos,
+          psp.ultimo_metodo_pago,
+          psp.ultimo_pago,
           p.tipo_servicio AS concepto
         FROM parqueadero p
         LEFT JOIN clientes c ON c.id = p.cliente_id
         LEFT JOIN usuarios u ON u.id = p.usuario_registro_id
+        ${buildPagosServiciosJoin("parqueadero", "p.id", "psp")}
         WHERE p.empresa_id = $1
           AND p.hora_salida IS NOT NULL
           AND p.hora_salida BETWEEN $2 AND $3
@@ -510,7 +595,7 @@ router.get("/caja", async (req, res) => {
           l.placa,
           c.nombre AS cliente_nombre,
           COALESCE(e.nombre, 'Lavador sin asignar') AS responsable_nombre,
-          COALESCE(NULLIF(TRIM(l.metodo_pago), ''), 'SIN_METODO') AS metodo_pago,
+          COALESCE(NULLIF(TRIM(l.metodo_pago), ''), NULL) AS metodo_pago_base,
           COALESCE(l.precio, 0) AS monto,
           CASE
             WHEN COALESCE(l.precio, 0) = 0
@@ -518,11 +603,23 @@ router.get("/caja", async (req, res) => {
             THEN 'PAGADO'
             ELSE 'PENDIENTE'
           END AS estado_caja,
+          CASE
+            WHEN COALESCE(l.precio, 0) = 0
+              OR NULLIF(TRIM(COALESCE(l.metodo_pago, '')), '') IS NOT NULL
+            THEN TRUE
+            ELSE FALSE
+          END AS legacy_paid,
+          COALESCE(psl.total_pagado, 0) AS total_pagado_registrado,
+          COALESCE(psl.cantidad_pagos, 0) AS cantidad_pagos,
+          COALESCE(psl.metodos_distintos, 0) AS metodos_distintos,
+          psl.ultimo_metodo_pago,
+          psl.ultimo_pago,
           COALESCE(tl.nombre, 'Lavado') AS concepto
         FROM lavadero l
         LEFT JOIN clientes c ON c.id = l.cliente_id
         LEFT JOIN empleados e ON e.id = l.lavador_id
         LEFT JOIN tipos_lavado tl ON tl.id = l.tipo_lavado_id
+        ${buildPagosServiciosJoin("lavadero", "l.id", "psl")}
         WHERE l.empresa_id = $1
           AND l.estado = 'Completado'
           AND l.hora_fin IS NOT NULL
@@ -537,7 +634,7 @@ router.get("/caja", async (req, res) => {
           t.placa,
           c.nombre AS cliente_nombre,
           COALESCE(e.nombre, 'Mecánico sin asignar') AS responsable_nombre,
-          COALESCE(NULLIF(TRIM(t.metodo_pago), ''), 'SIN_METODO') AS metodo_pago,
+          COALESCE(NULLIF(TRIM(t.metodo_pago), ''), NULL) AS metodo_pago_base,
           COALESCE(t.total_orden, 0) AS monto,
           CASE
             WHEN COALESCE(t.total_orden, 0) = 0
@@ -545,10 +642,22 @@ router.get("/caja", async (req, res) => {
             THEN 'PAGADO'
             ELSE 'PENDIENTE'
           END AS estado_caja,
+          CASE
+            WHEN COALESCE(t.total_orden, 0) = 0
+              OR NULLIF(TRIM(COALESCE(t.metodo_pago, '')), '') IS NOT NULL
+            THEN TRUE
+            ELSE FALSE
+          END AS legacy_paid,
+          COALESCE(pst.total_pagado, 0) AS total_pagado_registrado,
+          COALESCE(pst.cantidad_pagos, 0) AS cantidad_pagos,
+          COALESCE(pst.metodos_distintos, 0) AS metodos_distintos,
+          pst.ultimo_metodo_pago,
+          pst.ultimo_pago,
           COALESCE(t.descripcion_falla, 'Orden de taller') AS concepto
         FROM taller_ordenes t
         LEFT JOIN clientes c ON c.id = t.cliente_id
         LEFT JOIN empleados e ON e.id = t.mecanico_id
+        ${buildPagosServiciosJoin("taller", "t.id", "pst")}
         WHERE t.empresa_id = $1
           AND t.estado = 'Entregado'
           AND t.fecha_entrega IS NOT NULL
@@ -559,11 +668,7 @@ router.get("/caja", async (req, res) => {
       [empresa_id, desdeISO, hastaISO]
     );
 
-    const movimientos = rows.map((movimiento) => ({
-      ...movimiento,
-      monto: toNumber(movimiento.monto),
-      metodo_pago: normalizeMetodoPago(movimiento.metodo_pago),
-    }));
+    const movimientos = rows.map((movimiento) => enriquecerMovimientoCaja(movimiento));
 
     const caja = buildCajaResumen(movimientos);
 
@@ -572,7 +677,7 @@ router.get("/caja", async (req, res) => {
       hasta: hastaISO,
       generado_en: new Date().toISOString(),
       ...caja,
-      pendientes: movimientos.filter((movimiento) => movimiento.estado_caja === "PENDIENTE"),
+      pendientes: movimientos.filter((movimiento) => ["PENDIENTE", "ABONADO"].includes(movimiento.estado_caja)),
       movimientos: movimientos.slice(0, 120),
     });
   } catch (err) {

@@ -2,6 +2,7 @@
 const express = require("express");
 const db = require("../db");
 const auth = require("../middleware/auth");
+const { ensurePagosServiciosSchema } = require("../utils/pagos-servicios-schema");
 
 const router = express.Router();
 
@@ -299,15 +300,25 @@ function carteraPendienteSql() {
            p.id AS referencia_id,
            p.placa,
            COALESCE(c.nombre, p.nombre_cliente) AS cliente_nombre,
-           p.valor_total AS monto,
+           GREATEST(COALESCE(p.valor_total, 0) - COALESCE(psp.total_pagado, 0), 0) AS monto,
            p.hora_salida AS fecha
     FROM parqueadero p
     LEFT JOIN clientes c ON c.id = p.cliente_id
+    LEFT JOIN (
+      SELECT referencia_id, COALESCE(SUM(monto), 0) AS total_pagado
+      FROM pagos_servicios
+      WHERE empresa_id = $1 AND modulo = 'parqueadero' AND estado = 'APLICADO'
+      GROUP BY referencia_id
+    ) psp ON psp.referencia_id = p.id
     WHERE p.empresa_id = $1
       AND p.hora_salida IS NOT NULL
       AND COALESCE(p.valor_total, 0) > 0
-      AND NULLIF(TRIM(COALESCE(p.metodo_pago, '')), '') IS NULL
       AND UPPER(COALESCE(p.estado_pago, '')) NOT IN ('PAGADO', 'MENSUALIDAD')
+      AND (
+        NULLIF(TRIM(COALESCE(p.metodo_pago, '')), '') IS NULL
+        OR COALESCE(psp.total_pagado, 0) < COALESCE(p.valor_total, 0)
+      )
+      AND GREATEST(COALESCE(p.valor_total, 0) - COALESCE(psp.total_pagado, 0), 0) > 0
 
     UNION ALL
 
@@ -315,14 +326,24 @@ function carteraPendienteSql() {
            l.id AS referencia_id,
            l.placa,
            c.nombre AS cliente_nombre,
-           l.precio AS monto,
+           GREATEST(COALESCE(l.precio, 0) - COALESCE(psl.total_pagado, 0), 0) AS monto,
            l.hora_fin AS fecha
     FROM lavadero l
     LEFT JOIN clientes c ON c.id = l.cliente_id
+    LEFT JOIN (
+      SELECT referencia_id, COALESCE(SUM(monto), 0) AS total_pagado
+      FROM pagos_servicios
+      WHERE empresa_id = $1 AND modulo = 'lavadero' AND estado = 'APLICADO'
+      GROUP BY referencia_id
+    ) psl ON psl.referencia_id = l.id
     WHERE l.empresa_id = $1
       AND l.estado = 'Completado'
       AND COALESCE(l.precio, 0) > 0
-      AND NULLIF(TRIM(COALESCE(l.metodo_pago, '')), '') IS NULL
+      AND (
+        NULLIF(TRIM(COALESCE(l.metodo_pago, '')), '') IS NULL
+        OR COALESCE(psl.total_pagado, 0) < COALESCE(l.precio, 0)
+      )
+      AND GREATEST(COALESCE(l.precio, 0) - COALESCE(psl.total_pagado, 0), 0) > 0
 
     UNION ALL
 
@@ -330,18 +351,29 @@ function carteraPendienteSql() {
            t.id AS referencia_id,
            t.placa,
            c.nombre AS cliente_nombre,
-           t.total_orden AS monto,
+           GREATEST(COALESCE(t.total_orden, 0) - COALESCE(pst.total_pagado, 0), 0) AS monto,
            t.fecha_entrega AS fecha
     FROM taller_ordenes t
     LEFT JOIN clientes c ON c.id = t.cliente_id
+    LEFT JOIN (
+      SELECT referencia_id, COALESCE(SUM(monto), 0) AS total_pagado
+      FROM pagos_servicios
+      WHERE empresa_id = $1 AND modulo = 'taller' AND estado = 'APLICADO'
+      GROUP BY referencia_id
+    ) pst ON pst.referencia_id = t.id
     WHERE t.empresa_id = $1
       AND t.estado = 'Entregado'
       AND COALESCE(t.total_orden, 0) > 0
-      AND NULLIF(TRIM(COALESCE(t.metodo_pago, '')), '') IS NULL
+      AND (
+        NULLIF(TRIM(COALESCE(t.metodo_pago, '')), '') IS NULL
+        OR COALESCE(pst.total_pagado, 0) < COALESCE(t.total_orden, 0)
+      )
+      AND GREATEST(COALESCE(t.total_orden, 0) - COALESCE(pst.total_pagado, 0), 0) > 0
   `;
 }
 
 async function agregarAlertasCartera(empresaId, alertas, resumen) {
+  await ensurePagosServiciosSchema();
   const baseSql = carteraPendienteSql();
 
   const { rows: resumenRows } = await db.query(

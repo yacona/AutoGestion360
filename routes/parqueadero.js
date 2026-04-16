@@ -9,6 +9,11 @@ const {
   calculateParkingCharge,
   getParqueaderoConfig,
 } = require("../utils/parqueadero-config");
+const {
+  METODOS_PAGO_VALIDOS,
+  registrarPagoServicio,
+  toNumber,
+} = require("../utils/pagos-servicios");
 
 const router = express.Router();
 
@@ -843,11 +848,18 @@ router.get("/buscar/:placa", auth, async (req, res) => {
  */
 router.post("/salida/:id", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
+  const usuario_id = req.user.id;
   const registro_id = req.params.id;
   let client;
 
   try {
-    let { metodo_pago, detalle_pago, observaciones, referencia_transaccion } = req.body || {};
+    let {
+      metodo_pago,
+      detalle_pago,
+      observaciones,
+      referencia_transaccion,
+      monto_pago,
+    } = req.body || {};
 
     // Normalizar datos
     metodo_pago = limpiarTexto(metodo_pago);
@@ -860,16 +872,9 @@ router.post("/salida/:id", auth, async (req, res) => {
       return res.status(400).json({ error: "ID de registro inválido." });
     }
 
-    // Validar que metodo_pago es requerido y válido
-    const metodos_validos = ["EFECTIVO", "TARJETA", "TRANSFERENCIA", "MIXTO", "MENSUALIDAD", "OTRO"];
-    if (!metodo_pago) {
-      return res.status(400).json({ 
-        error: "Debe especificar el método de pago (EFECTIVO, TARJETA, TRANSFERENCIA u OTRO)." 
-      });
-    }
-    if (!metodos_validos.includes(metodo_pago)) {
-      return res.status(400).json({ 
-        error: `Método de pago inválido. Opciones válidas: ${metodos_validos.join(", ")}` 
+    if (metodo_pago && !METODOS_PAGO_VALIDOS.includes(metodo_pago)) {
+      return res.status(400).json({
+        error: `Método de pago inválido. Opciones válidas: ${METODOS_PAGO_VALIDOS.join(", ")}`,
       });
     }
 
@@ -921,39 +926,88 @@ router.post("/salida/:id", auth, async (req, res) => {
       reglas: configParqueadero.reglas,
     });
     cobro = aplicarTipoServicioAlCobro(cobro, tarifa, registro.tipo_servicio);
-    const valor_total = cobro.valor_total;
+    const valor_total = toNumber(cobro.valor_total);
+    const esMensualidad = String(registro.tipo_servicio || "").toUpperCase() === "MENSUALIDAD";
+    const requiereCobro = !esMensualidad && valor_total > 0;
 
-    // 5) Actualizar el registro
+    if (requiereCobro && !metodo_pago) {
+      await client.query("ROLLBACK");
+      client.release();
+      client = null;
+      return res.status(400).json({
+        error: "Debe especificar el método de pago para registrar la salida.",
+      });
+    }
+
+    if (!requiereCobro && !metodo_pago && esMensualidad) {
+      metodo_pago = "MENSUALIDAD";
+    }
+
+    // 5) Cerrar el registro y dejar el estado listo para pago completo o parcial
+    let pagoResumen = null;
     const updateQuery = await client.query(
       `UPDATE parqueadero
        SET hora_salida = $1,
            minutos_total = $2,
            valor_total = $3,
-           metodo_pago = $4,
-           detalle_pago = $5,
-           observaciones = COALESCE(observaciones || '\n', '') || $6
-       WHERE id = $7
+           estado_pago = $4,
+           metodo_pago = $5,
+           detalle_pago = $6,
+           observaciones = CASE
+             WHEN $7 IS NULL THEN observaciones
+             ELSE COALESCE(observaciones || '\n', '') || $7
+           END
+       WHERE id = $8
        RETURNING *`,
       [
         hora_salida,
         minutos_total,
         valor_total,
-        metodo_pago,
-        detalle_pago || null,
+        esMensualidad ? "MENSUALIDAD" : (requiereCobro ? "PENDIENTE" : "PAGADO"),
+        requiereCobro ? null : (metodo_pago || null),
+        requiereCobro ? null : (detalle_pago || null),
         observaciones || null,
         registro_id,
       ]
     );
 
+    let registroActualizado = updateQuery.rows[0];
+
+    if (requiereCobro) {
+      const resultadoPago = await registrarPagoServicio({
+        queryable: client,
+        empresaId: empresa_id,
+        usuarioId: usuario_id,
+        modulo: "parqueadero",
+        referenciaId: registro_id,
+        monto: monto_pago,
+        metodoPago: metodo_pago,
+        referenciaTransaccion: referencia_transaccion,
+        detallePago: detalle_pago,
+      });
+
+      pagoResumen = resultadoPago.servicio;
+      const { rows: actualizadoRows } = await client.query(
+        `SELECT * FROM parqueadero WHERE id = $1 AND empresa_id = $2 LIMIT 1`,
+        [registro_id, empresa_id]
+      );
+      registroActualizado = actualizadoRows[0] || registroActualizado;
+    }
+
     await client.query("COMMIT");
     client.release();
     client = null;
 
-    const registroActualizado = updateQuery.rows[0];
-
     return res.json({
-      mensaje: "Salida registrada correctamente.",
+      mensaje: pagoResumen
+        ? pagoResumen.estado_cartera === "PAGADO"
+          ? "Salida registrada correctamente y pago confirmado."
+          : "Salida registrada correctamente. Se registró un abono y quedó saldo pendiente."
+        : esMensualidad
+          ? "Salida registrada correctamente. Vehículo cubierto por mensualidad."
+          : "Salida registrada correctamente.",
       parqueadero: registroActualizado,
+      pago_resumen: pagoResumen,
       resumen: {
         tiempo_total_minutos: minutos_total,
         tiempo_total_horas: (minutos_total / 60).toFixed(2),
