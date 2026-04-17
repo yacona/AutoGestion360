@@ -2126,26 +2126,31 @@
                     </select>
                   </div>
                   <div class="form-group">
-                    <label for="empresa-admin-licencia">Tipo de licencia</label>
-                    <select id="empresa-admin-licencia">
-                      <option value="Demo">Demo</option>
-                      <option value="Básica">Básica</option>
-                      <option value="Pro">Pro</option>
-                      <option value="Premium">Premium</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="form-row">
-                  <div class="form-group">
-                    <label for="empresa-admin-licencia-fin">Fin de licencia</label>
-                    <input type="date" id="empresa-admin-licencia-fin" />
-                  </div>
-                  <div class="form-group">
                     <label for="empresa-admin-activa">Estado</label>
                     <select id="empresa-admin-activa">
                       <option value="true">Activa</option>
                       <option value="false">Inactiva</option>
                     </select>
+                  </div>
+                </div>
+
+                <!-- Plan inicial — solo visible al crear; se oculta al editar -->
+                <div id="empresa-admin-plan-row" class="form-row">
+                  <div class="form-group">
+                    <label for="empresa-admin-plan">Plan inicial</label>
+                    <select id="empresa-admin-plan">
+                      <!-- Poblado dinámicamente por populatePlanesSelect() -->
+                      <option value="starter">Starter</option>
+                      <option value="pro">Pro</option>
+                      <option value="enterprise">Enterprise</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <p class="small-text" style="padding-top:1.8rem">
+                      El tenant iniciará en <strong>TRIAL</strong> con el plan seleccionado.
+                      Los módulos activos los define el plan; puedes ajustarlos después con el botón
+                      <em>Módulos</em> en la tabla.
+                    </p>
                   </div>
                 </div>
 
@@ -2381,6 +2386,140 @@
               </div>
             </div>
 
+            <!-- ══════════════════════════════════════════════════
+                 CARD: Panel de Plan — se muestra al hacer clic en "Plan"
+                 en la fila de la tabla. Se oculta por defecto.
+                 ══════════════════════════════════════════════════ -->
+            <div id="panel-empresa-plan" class="card card-full hidden">
+              <div class="form-card-heading">
+                <div>
+                  <span class="eyebrow">Suscripción</span>
+                  <h3 id="plan-panel-titulo">Plan del tenant</h3>
+                  <p class="small-text">Cambia el plan activo, el ciclo y el estado de la suscripción.</p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="cerrarPanelPlan()">✕ Cerrar</button>
+              </div>
+
+              <form id="form-panel-plan" onsubmit="handleAsignarPlan(event)">
+                <input type="hidden" id="plan-empresa-id" />
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="plan-select-plan-id">Plan *</label>
+                    <select id="plan-select-plan-id" required>
+                      <!-- Poblado por populatePlanesSelect() -->
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="plan-select-ciclo">Ciclo</label>
+                    <select id="plan-select-ciclo">
+                      <option value="MENSUAL">Mensual</option>
+                      <option value="ANUAL">Anual</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="plan-select-estado">Estado inicial</label>
+                    <select id="plan-select-estado">
+                      <option value="ACTIVA">ACTIVA</option>
+                      <option value="TRIAL">TRIAL</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label for="plan-input-precio">Precio pactado (COP)</label>
+                    <input type="number" id="plan-input-precio" min="0" step="100" placeholder="0" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="plan-input-fecha-fin">Fecha fin <span class="small-text">(vacío = sin vencimiento)</span></label>
+                    <input type="date" id="plan-input-fecha-fin" />
+                  </div>
+                  <div class="form-group">
+                    <label for="plan-input-obs">Observaciones</label>
+                    <input type="text" id="plan-input-obs" placeholder="Acuerdo comercial, notas..." />
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Guardar plan</button>
+                  <button type="button" class="btn btn-warning" onclick="handleCambiarEstadoPlan('SUSPENDIDA')">Suspender</button>
+                  <button type="button" class="btn btn-danger"  onclick="handleCambiarEstadoPlan('CANCELADA')">Cancelar suscripción</button>
+                </div>
+                <div id="plan-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <!-- ══════════════════════════════════════════════════
+                 CARD: Panel de Módulos — overrides por empresa
+                 ══════════════════════════════════════════════════ -->
+            <div id="panel-empresa-modulos" class="card card-full hidden">
+              <div class="form-card-heading">
+                <div>
+                  <span class="eyebrow">Overrides de módulos</span>
+                  <h3 id="modulos-panel-titulo">Módulos del tenant</h3>
+                  <p class="small-text">
+                    <strong>En plan</strong> = incluido por el plan activo.
+                    <strong>Add-on</strong> = habilitado fuera del plan.
+                    <strong>Desactivado</strong> = bloqueado aunque el plan lo incluya.
+                  </p>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="cerrarPanelModulos()">✕ Cerrar</button>
+              </div>
+
+              <div id="modulos-empresa-msg" class="small-message" hidden></div>
+
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Módulo</th>
+                      <th>En plan</th>
+                      <th>Estado efectivo</th>
+                      <th>Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody id="modulos-empresa-tbody"></tbody>
+                </table>
+                <div id="modulos-empresa-empty" class="table-empty" hidden>
+                  No hay módulos disponibles.
+                </div>
+              </div>
+            </div>
+
+            <!-- ══════════════════════════════════════════════════
+                 CARD: Próximas a vencer (siempre visible)
+                 ══════════════════════════════════════════════════ -->
+            <div class="card card-full">
+              <div class="list-heading">
+                <div>
+                  <span class="eyebrow">Alertas de renovación</span>
+                  <h3>Suscripciones próximas a vencer</h3>
+                  <p class="small-text">Trials y suscripciones activas que vencen en los próximos 30 días.</p>
+                </div>
+              </div>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Empresa</th>
+                      <th>Plan</th>
+                      <th>Estado</th>
+                      <th>Vence</th>
+                      <th>Días restantes</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody id="proximas-vencer-tbody"></tbody>
+                </table>
+                <div id="proximas-vencer-empty" class="table-empty" hidden>
+                  No hay vencimientos en los próximos 30 días. 🎉
+                </div>
+              </div>
+            </div>
+
+            <!-- ══════════════════════════════════════════════════
+                 CARD: Tabla principal de empresas
+                 ══════════════════════════════════════════════════ -->
             <div class="card card-expand">
               <div class="list-heading">
                 <h3>Empresas registradas</h3>
@@ -2395,14 +2534,12 @@
                       <th>Empresa</th>
                       <th>NIT</th>
                       <th>Ciudad</th>
+                      <th>Plan</th>
+                      <th>Vence</th>
                       <th>Usuarios</th>
                       <th>Clientes</th>
-                      <th>Vehículos</th>
-                      <th>Parqueados</th>
-                      <th>Licencia</th>
-                      <th>Suscripción</th>
                       <th>Estado</th>
-                      <th></th>
+                      <th>Acciones</th>
                     </tr>
                   </thead>
                   <tbody id="empresas-tbody"></tbody>

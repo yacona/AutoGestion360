@@ -91,17 +91,17 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ── Empresas (superadmin) ───────────────────────────────
   document.getElementById("form-empresa-admin")?.addEventListener("submit", handleGuardarEmpresaAdmin);
   document.getElementById("empresas-buscar")?.addEventListener("input", renderEmpresasTable);
-  document.getElementById("btn-empresa-cancelar-edicion")?.addEventListener("click", resetEmpresaAdminForm);
-  document.getElementById("form-licencia-empresa")?.addEventListener("submit", handleAsignarLicenciaEmpresa);
-  document.getElementById("licencia-plan-id")?.addEventListener("change", renderLicenciaPlanModulos);
-  document.getElementById("licencia-empresa-id")?.addEventListener("change", () => syncLicenciaEmpresaForm());
-  document.getElementById("form-suscripcion-saas")?.addEventListener("submit", handleGuardarSuscripcionSaas);
-  document.getElementById("suscripcion-empresa-id")?.addEventListener("change", () => syncSuscripcionSaasForm());
-  document.getElementById("suscripcion-plan-id")?.addEventListener("change", () => {
-    const licencia = getLicenciaById(document.getElementById("suscripcion-plan-id")?.value);
-    if (licencia) document.getElementById("suscripcion-precio-plan").value = String(Math.round(Number(licencia.precio || 0)));
+  document.getElementById("btn-empresa-cancelar-edicion")?.addEventListener("click", () => {
+    resetEmpresaAdminForm();
+    // Volver a mostrar la fila del plan al cancelar edición
+    document.getElementById("empresa-admin-plan-row")?.classList.remove("hidden");
   });
-  document.getElementById("btn-suscripcion-renovar")?.addEventListener("click", handleRenovarSuscripcionSaas);
+  // Panel Plan (nuevo sistema)
+  document.getElementById("form-panel-plan")?.addEventListener("submit", handleAsignarPlan);
+  // Panel Módulos no necesita listener global: los botones usan onclick inline
+  // Legacy — formularios que aún apuntan al sistema de licencias anterior
+  document.getElementById("form-licencia-empresa")?.addEventListener("submit", handleAsignarLicenciaEmpresa);
+  document.getElementById("form-suscripcion-saas")?.addEventListener("submit", handleGuardarSuscripcionSaas);
   document.getElementById("btn-suscripcion-suspender")?.addEventListener("click", () => handleCambiarEstadoSuscripcionSaas("SUSPENDIDA"));
   document.getElementById("btn-suscripcion-cancelar")?.addEventListener("click", () => handleCambiarEstadoSuscripcionSaas("CANCELADA"));
   document.getElementById("form-factura-saas")?.addEventListener("submit", handleRegistrarFacturaSaas);

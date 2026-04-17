@@ -6,22 +6,27 @@ const auth = require("../middleware/auth");
 const router = express.Router();
 
 // Función auxiliar para registrar auditoría
+// Columnas reales en schema: empresa_id, usuario_id, accion, entidad, entidad_id, detalle (JSONB), ip
 async function registrarAuditoria(empresa_id, usuario_id, modulo, accion, tabla, registro_id, datos_antes, datos_despues, razon = null, ip = null) {
   try {
+    const detalle = {
+      modulo,
+      ...(datos_antes !== null && datos_antes !== undefined ? { datos_antes } : {}),
+      ...(datos_despues !== null && datos_despues !== undefined ? { datos_despues } : {}),
+      ...(razon !== null && razon !== undefined ? { razon } : {}),
+    };
+
     await db.query(
-      `INSERT INTO auditoria 
-       (empresa_id, usuario_id, modulo, accion, tabla_afectada, registro_id, datos_antes, datos_despues, razon, ip_address)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO auditoria
+       (empresa_id, usuario_id, accion, entidad, entidad_id, detalle, ip)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)`,
       [
         empresa_id,
         usuario_id,
-        modulo,
         accion,
         tabla,
-        registro_id,
-        datos_antes ? JSON.stringify(datos_antes) : null,
-        datos_despues ? JSON.stringify(datos_despues) : null,
-        razon,
+        registro_id || null,
+        JSON.stringify(detalle),
         ip,
       ]
     );
@@ -47,13 +52,13 @@ router.get("/", auth, async (req, res) => {
   let paramCount = 2;
 
   if (modulo) {
-    query += ` AND modulo = $${paramCount}`;
+    query += ` AND detalle->>'modulo' = $${paramCount}`;
     params.push(modulo);
     paramCount++;
   }
 
   if (tabla) {
-    query += ` AND tabla_afectada = $${paramCount}`;
+    query += ` AND entidad = $${paramCount}`;
     params.push(tabla);
     paramCount++;
   }
@@ -88,8 +93,8 @@ router.get("/registro/:tabla/:id", auth, async (req, res) => {
 
   try {
     const { rows } = await db.query(
-      `SELECT * FROM auditoria 
-       WHERE empresa_id = $1 AND tabla_afectada = $2 AND registro_id = $3 
+      `SELECT * FROM auditoria
+       WHERE empresa_id = $1 AND entidad = $2 AND entidad_id = $3
        ORDER BY creado_en DESC`,
       [empresa_id, tabla, id]
     );

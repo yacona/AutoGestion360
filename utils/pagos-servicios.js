@@ -476,23 +476,6 @@ async function registrarPagoServicio({
     detalleFinal,
   });
 
-  if (moduloNormalizado === "parqueadero") {
-    await queryable.query(
-      `INSERT INTO pagos_parqueadero
-       (empresa_id, parqueadero_id, monto, metodo_pago, referencia_transaccion, estado, usuario_registro_id, fecha_pago)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
-      [
-        empresaId,
-        referenciaNormalizada,
-        montoFinal,
-        metodoNormalizado,
-        referenciaLimpia,
-        pagoCompleto ? "PAGADO" : "PENDIENTE",
-        usuarioId,
-      ]
-    );
-  }
-
   return {
     pago: {
       ...pago,

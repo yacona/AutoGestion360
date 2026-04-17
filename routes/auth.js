@@ -9,6 +9,8 @@ const db = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { ensureLicenciasSchema } = require("../utils/licencias-schema");
 const { getSuscripcionEmpresa } = require("../utils/suscripciones-schema");
+const { getLicenseStatus } = require("../services/licenseService");
+const { getPermisosParaRol } = require("../middleware/access");
 
 const router = express.Router();
 
@@ -306,24 +308,51 @@ router.post("/login", async (req, res) => {
 
     const token = crearToken(user);
 
+    // Resolver licencia y permisos en paralelo para no bloquear el login
+    const licenciaStatus = await getLicenseStatus(user.empresa_id).catch(() => null);
+    const permisos = getPermisosParaRol(user.rol);
+
+    // Construir el objeto licencia compatible con setLicensePermissions() del frontend
+    // y con campos extra para uso futuro.
+    const licenciaPayload = licenciaStatus
+      ? {
+          // Campos para setLicensePermissions() (frontend/js/core/auth.js)
+          modulos:  licenciaStatus.modulos,
+          licencia: licenciaStatus.plan
+            ? { nombre: licenciaStatus.plan.nombre }
+            : { nombre: licenciaStatus.fuente === 'legacy' ? (user.licencia_tipo || 'Demo') : 'Sin plan' },
+          expirada: !licenciaStatus.vigente,
+          // Campos extendidos
+          vigente:  licenciaStatus.vigente,
+          estado:   licenciaStatus.estado,
+          plan:     licenciaStatus.plan?.codigo ?? null,
+          plan_nombre: licenciaStatus.plan?.nombre ?? null,
+          limites:  licenciaStatus.limites,
+          fuente:   licenciaStatus.fuente,
+        }
+      : null;
+
     res.json({
       token,
       usuario: {
-        id: user.id,
+        id:         user.id,
         empresa_id: user.empresa_id,
-        nombre: user.nombre,
-        email: user.email,
-        rol: user.rol,
+        nombre:     user.nombre,
+        email:      user.email,
+        rol:        user.rol,
+        permisos,   // lista de permisos según rol para uso en el frontend
       },
       empresa: {
-        id: user.empresa_id,
-        nombre: user.empresa_nombre,
-        logo_url: user.logo_url,
+        id:           user.empresa_id,
+        nombre:       user.empresa_nombre,
+        logo_url:     user.logo_url,
         zona_horaria: user.zona_horaria,
+        // legacy — mantener para compatibilidad
         licencia_tipo: user.licencia_tipo,
-        licencia_id: user.licencia_id,
-        licencia_fin: user.licencia_fin,
+        licencia_id:   user.licencia_id,
+        licencia_fin:  user.licencia_fin,
       },
+      licencia: licenciaPayload,
     });
   } catch (err) {
     console.error("Error en /login:", err);

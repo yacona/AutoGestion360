@@ -29,6 +29,10 @@ const usuariosRoutes = require('../routes/usuarios');
 const licenciasRoutes = require('../routes/licencias');
 const suscripcionesRoutes = require('../routes/suscripciones');
 
+// ── Panel SuperAdmin (sistema nuevo planes/suscripciones) ────────────────────
+const adminPlanesRoutes      = require('../routes/admin/planes-admin');
+const adminEmpresaModRoutes  = require('../routes/admin/empresa-modulos');
+
 const app = express();
 
 app.use(cors());
@@ -67,6 +71,11 @@ app.use('/api/empresas', authMiddleware, empresasRoutes);
 app.use('/api/usuarios', authMiddleware, licenseMiddleware('usuarios'), usuariosRoutes);
 app.use('/api/licencias', authMiddleware, licenciasRoutes);
 app.use('/api/suscripciones', authMiddleware, suscripcionesRoutes);
+
+// ── Panel SuperAdmin — nuevas rutas (sistema planes/suscripciones 002) ───────
+// authMiddleware ya verifica el JWT; el guard SuperAdmin está dentro de cada router.
+app.use('/api/admin',                  authMiddleware, adminPlanesRoutes);
+app.use('/api/admin/empresa-modulos',  authMiddleware, adminEmpresaModRoutes);
 
 // Ruta de perfil (debug)
 app.get('/api/perfil', authMiddleware, (req, res) => res.json({ mensaje: 'Acceso autorizado', usuario_actual: req.user }));

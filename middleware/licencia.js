@@ -2,6 +2,7 @@
 const db = require('../db');
 const { ensureLicenciasSchema } = require('../utils/licencias-schema');
 const { getSuscripcionEmpresa } = require('../utils/suscripciones-schema');
+const { getLicenseStatus } = require('../services/licenseService');
 
 const MODULOS_POR_LICENCIA_LEGACY = {
   demo: ['dashboard', 'parqueadero', 'clientes'],
@@ -200,6 +201,39 @@ async function verificarLicenciaLegacy(empresaId, modulo, res) {
   return true;
 }
 
+/**
+ * Verificación usando el sistema nuevo de suscripciones + planes.
+ * Retorna: true (acceso OK) | false (acceso denegado, ya respondió) | null (no hay registro, fallback)
+ */
+async function verificarSuscripcionPlanes(empresaId, modulo, res) {
+  const status = await getLicenseStatus(empresaId);
+
+  // Solo tomar el control si el registro viene del sistema de planes
+  if (status.fuente !== 'planes') return null;
+
+  const { vigente, estado } = status;
+
+  if (!vigente) {
+    const MENSAJES = {
+      VENCIDA:    'Tu suscripción ha vencido. Renueva tu plan para continuar.',
+      SUSPENDIDA: 'Tu suscripción está suspendida. Contacta al administrador.',
+      CANCELADA:  'Tu suscripción fue cancelada.',
+    };
+    res.status(403).json({ error: MENSAJES[estado] || 'Suscripción inactiva.', estado });
+    return false;
+  }
+
+  if (!status.modulos.includes(modulo)) {
+    res.status(403).json({
+      error: `El módulo '${modulo}' no está incluido en tu plan ${status.plan.nombre}.`,
+      plan:  status.plan.codigo,
+    });
+    return false;
+  }
+
+  return true;
+}
+
 function crearVerificadorLicencia(moduloExplicito = null) {
   return async function verificarLicencia(req, res, next) {
     const empresaId = req.user.empresa_id;
@@ -210,6 +244,13 @@ function crearVerificadorLicencia(moduloExplicito = null) {
         return next();
       }
 
+      // ── Sistema nuevo: suscripciones + planes ──────────────
+      const resultadoPlanes = await verificarSuscripcionPlanes(empresaId, modulo, res);
+      if (resultadoPlanes === true)  return next();
+      if (resultadoPlanes === false) return;
+      // resultadoPlanes === null → sin registro en planes, usar cadena legacy
+
+      // ── Cadena legacy ──────────────────────────────────────
       await ensureLicenciasSchema();
       const suscripcionValida = await validarSuscripcion(empresaId, res);
       if (!suscripcionValida) {

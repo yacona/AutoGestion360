@@ -30,6 +30,18 @@ function userCanManageUsers() {
   return userIsAdmin();
 }
 
+/**
+ * Verifica si el usuario actual tiene un permiso dado.
+ * Los permisos llegan del login en data.usuario.permisos.
+ *
+ * Uso en el frontend:
+ *   if (userCan('clientes:eliminar')) mostrarBotonEliminar();
+ */
+function userCan(permiso) {
+  const permisos = getCurrentUser().permisos || [];
+  return permisos.includes("*") || permisos.includes(permiso);
+}
+
 function setLicensePermissions(data = {}) {
   const moduleNames = Array.isArray(data.modulos)
     ? data.modulos.map((m) => normalizeRole(typeof m === "string" ? m : m?.nombre))
@@ -123,7 +135,12 @@ async function initAfterLogin() {
 
   const empresaLogo = localStorage.getItem("empresa_logo");
   updateSidebarLogo(empresaLogo, empresa);
-  await loadLicensePermissions();
+
+  // Si el login ya devolvió la licencia, no hacemos la llamada extra al servidor.
+  if (!licensePermissionsState.loaded) {
+    await loadLicensePermissions();
+  }
+
   applyPermissionVisibility();
   changeView("dashboard");
 }
@@ -156,6 +173,12 @@ async function handleLogin(event) {
     localStorage.setItem(STORAGE.EMPRESA, data.empresa?.nombre || "");
     localStorage.setItem("empresa_logo", data.empresa?.logo_url || "");
     localStorage.setItem("user_info", JSON.stringify(data.usuario));
+
+    // Si el login ya devuelve la licencia, la cargamos de inmediato
+    // para no hacer una llamada extra a /api/empresa/licencia/permisos
+    if (data.licencia) {
+      setLicensePermissions(data.licencia);
+    }
 
     showMainView();
     await initAfterLogin();

@@ -1,0 +1,515 @@
+'use strict';
+
+/**
+ * adminService.js — Lógica de negocio del panel SuperAdmin
+ *
+ * Trabaja exclusivamente con el sistema nuevo:
+ *   planes  →  plan_modulos  →  suscripciones  →  empresa_modulos
+ *
+ * Todas las funciones reciben un `queryable` opcional (pool o client de pg)
+ * para poder participar en transacciones externas.
+ */
+
+const bcrypt = require('bcryptjs');
+const db = require('../db');
+const { getParqueaderoConfig } = require('../utils/parqueadero-config');
+
+// ─────────────────────────────────────────────────────────────
+// Helpers internos
+// ─────────────────────────────────────────────────────────────
+
+function clean(v) {
+  const s = String(v ?? '').trim();
+  return s || null;
+}
+
+function requireField(value, name) {
+  if (!clean(value)) throw Object.assign(new Error(`El campo '${name}' es obligatorio.`), { statusCode: 400 });
+}
+
+// ─────────────────────────────────────────────────────────────
+// EMPRESAS
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Lista todas las empresas con métricas operativas y el plan activo
+ * del sistema nuevo (suscripciones + planes).
+ */
+async function listarEmpresas(queryable = db) {
+  const { rows } = await queryable.query(`
+    SELECT
+      e.id,
+      e.nombre,
+      e.nit,
+      e.ciudad,
+      e.email_contacto,
+      e.telefono,
+      e.zona_horaria,
+      e.activa,
+      e.creado_en,
+      -- Plan actual (sistema nuevo)
+      p.codigo          AS plan_codigo,
+      p.nombre          AS plan_nombre,
+      s.estado          AS suscripcion_estado,
+      s.fecha_fin       AS suscripcion_fin,
+      s.trial_hasta,
+      -- Métricas de uso
+      COALESCE(u.total,   0)::int AS usuarios_total,
+      COALESCE(c.total,   0)::int AS clientes_total,
+      COALESCE(pq.activos,0)::int AS parqueados_activos
+    FROM empresas e
+    LEFT JOIN suscripciones s
+      ON s.empresa_id = e.id AND s.estado IN ('TRIAL','ACTIVA')
+    LEFT JOIN planes p ON p.id = s.plan_id
+    LEFT JOIN (SELECT empresa_id, COUNT(*) AS total  FROM usuarios   GROUP BY empresa_id) u  ON u.empresa_id  = e.id
+    LEFT JOIN (SELECT empresa_id, COUNT(*) AS total  FROM clientes   GROUP BY empresa_id) c  ON c.empresa_id  = e.id
+    LEFT JOIN (SELECT empresa_id, COUNT(*) AS activos FROM parqueadero
+               WHERE hora_salida IS NULL GROUP BY empresa_id) pq ON pq.empresa_id = e.id
+    ORDER BY e.creado_en DESC
+  `);
+  return rows;
+}
+
+/**
+ * Devuelve una empresa con su suscripción activa y módulos habilitados.
+ */
+async function getEmpresaCompleta(empresaId, queryable = db) {
+  const { rows } = await queryable.query(`
+    SELECT
+      e.*,
+      p.codigo       AS plan_codigo,
+      p.nombre       AS plan_nombre,
+      p.precio_mensual,
+      s.id           AS suscripcion_id,
+      s.estado       AS suscripcion_estado,
+      s.fecha_inicio AS suscripcion_inicio,
+      s.fecha_fin    AS suscripcion_fin,
+      s.trial_hasta,
+      s.ciclo,
+      s.precio_pactado
+    FROM empresas e
+    LEFT JOIN suscripciones s  ON s.empresa_id = e.id AND s.estado IN ('TRIAL','ACTIVA')
+    LEFT JOIN planes p         ON p.id = s.plan_id
+    WHERE e.id = $1
+    LIMIT 1
+  `, [empresaId]);
+  return rows[0] ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// ONBOARDING — Creación atómica de tenant
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Crea un nuevo tenant (empresa + suscripción + usuario admin) en una sola
+ * transacción.
+ *
+ * @param {object} data
+ *   nombre, nit, ciudad, direccion, telefono, emailContacto, zonaHoraria
+ *   planCodigo  — 'starter' | 'pro' | 'enterprise'   (default: 'starter')
+ *   adminNombre, adminEmail, adminPassword            (opcional)
+ * @param {object} [queryable]  pool o client de pg
+ */
+async function onboardEmpresa(data, queryable = db) {
+  const {
+    nombre, nit, ciudad, direccion, telefono,
+    emailContacto, zonaHoraria = 'America/Bogota',
+    planCodigo = 'starter',
+    adminNombre, adminEmail, adminPassword,
+  } = data;
+
+  requireField(nombre, 'nombre');
+  if (adminEmail && String(adminPassword || '').trim().length < 6) {
+    throw Object.assign(
+      new Error('La contraseña del administrador debe tener al menos 6 caracteres.'),
+      { statusCode: 400 }
+    );
+  }
+
+  // Necesitamos client para la transacción
+  const isExternalClient = queryable !== db && typeof queryable.query === 'function' && !queryable.connect;
+  const client = isExternalClient ? queryable : await db.connect();
+
+  try {
+    if (!isExternalClient) await client.query('BEGIN');
+
+    // 1. Verificar email único
+    if (adminEmail) {
+      const { rows } = await client.query(
+        'SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1',
+        [adminEmail]
+      );
+      if (rows.length > 0) {
+        throw Object.assign(
+          new Error('Ese correo ya está registrado. Usa uno distinto para el admin.'),
+          { statusCode: 409 }
+        );
+      }
+    }
+
+    // 2. Crear empresa
+    const { rows: empRows } = await client.query(`
+      INSERT INTO empresas (nombre, nit, ciudad, direccion, telefono, email_contacto, zona_horaria, activa)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE)
+      RETURNING *
+    `, [clean(nombre), clean(nit), clean(ciudad), clean(direccion), clean(telefono), clean(emailContacto), zonaHoraria]);
+    const empresa = empRows[0];
+
+    // 3. Buscar plan
+    const { rows: planRows } = await client.query(
+      'SELECT * FROM planes WHERE codigo = $1 AND activo = TRUE LIMIT 1',
+      [planCodigo]
+    );
+    const plan = planRows[0];
+    if (!plan) throw Object.assign(new Error(`Plan '${planCodigo}' no encontrado.`), { statusCode: 400 });
+
+    // 4. Crear suscripción (TRIAL)
+    const trialHasta = plan.trial_dias
+      ? new Date(Date.now() + plan.trial_dias * 86400000)
+      : null;
+
+    await client.query(`
+      INSERT INTO suscripciones
+        (empresa_id, plan_id, estado, fecha_inicio, trial_hasta, ciclo,
+         renovacion_automatica, pasarela, precio_pactado, moneda, observaciones)
+      VALUES ($1,$2,'TRIAL',NOW(),$3,'MENSUAL',FALSE,'MANUAL',$4,'COP','Suscripción inicial en onboarding')
+    `, [empresa.id, plan.id, trialHasta, plan.precio_mensual ?? 0]);
+
+    // 5. Crear usuario admin
+    if (adminEmail) {
+      const hash = await bcrypt.hash(String(adminPassword).trim(), 10);
+      await client.query(`
+        INSERT INTO usuarios (empresa_id, nombre, email, password_hash, rol)
+        VALUES ($1,$2,$3,$4,'Administrador')
+      `, [empresa.id, clean(adminNombre) || `Admin ${empresa.nombre}`, adminEmail, hash]);
+    }
+
+    // 6. Inicializar configuración de parqueadero
+    await getParqueaderoConfig(empresa.id, client);
+
+    if (!isExternalClient) await client.query('COMMIT');
+
+    return { empresa, plan };
+  } catch (err) {
+    if (!isExternalClient) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (!isExternalClient) client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// PLANES Y SUSCRIPCIONES
+// ─────────────────────────────────────────────────────────────
+
+/** Lista todos los planes con el conteo de módulos que incluyen. */
+async function listarPlanes(queryable = db) {
+  const { rows } = await queryable.query(`
+    SELECT
+      p.*,
+      COUNT(pm.id)::int AS modulos_incluidos
+    FROM planes p
+    LEFT JOIN plan_modulos pm ON pm.plan_id = p.id AND pm.activo = TRUE
+    WHERE p.activo = TRUE
+    GROUP BY p.id
+    ORDER BY p.orden, p.id
+  `);
+  return rows;
+}
+
+/**
+ * Asigna un plan a una empresa.
+ * Cancela la suscripción activa anterior (si es diferente plan).
+ * Si es el mismo plan y está en TRIAL, actualiza en vez de reemplazar.
+ *
+ * @param {number} empresaId
+ * @param {number} planId
+ * @param {object} opts  ciclo, precioPactado, moneda, fechaFin, observaciones, pasarela
+ */
+async function asignarPlan(empresaId, planId, opts = {}, queryable = db) {
+  const {
+    ciclo = 'MENSUAL',
+    precioPactado = null,
+    moneda = 'COP',
+    fechaFin = null,
+    observaciones = null,
+    pasarela = 'MANUAL',
+    estado = 'ACTIVA',
+  } = opts;
+
+  const { rows: planRows } = await queryable.query(
+    'SELECT * FROM planes WHERE id = $1 LIMIT 1', [planId]
+  );
+  if (planRows.length === 0) {
+    throw Object.assign(new Error('Plan no encontrado.'), { statusCode: 404 });
+  }
+  const plan = planRows[0];
+  const precioFinal = precioPactado !== null ? precioPactado
+    : (ciclo === 'ANUAL' ? plan.precio_anual : plan.precio_mensual) ?? 0;
+
+  const isExternalClient = queryable !== db && typeof queryable.query === 'function' && !queryable.connect;
+  const client = isExternalClient ? queryable : await db.connect();
+
+  try {
+    if (!isExternalClient) await client.query('BEGIN');
+
+    // Cancelar suscripción activa anterior
+    await client.query(`
+      UPDATE suscripciones
+      SET estado = 'CANCELADA', actualizado_en = NOW()
+      WHERE empresa_id = $1 AND estado IN ('TRIAL','ACTIVA')
+    `, [empresaId]);
+
+    // Calcular trial_hasta si aplica
+    const trialHasta = estado === 'TRIAL' && plan.trial_dias
+      ? new Date(Date.now() + plan.trial_dias * 86400000)
+      : null;
+
+    const { rows } = await client.query(`
+      INSERT INTO suscripciones
+        (empresa_id, plan_id, estado, fecha_inicio, fecha_fin, trial_hasta,
+         ciclo, pasarela, precio_pactado, moneda, observaciones)
+      VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,$8,$9,$10)
+      RETURNING *
+    `, [empresaId, planId, estado, fechaFin, trialHasta,
+        ciclo, pasarela, precioFinal, moneda, observaciones]);
+
+    if (!isExternalClient) await client.query('COMMIT');
+    return rows[0];
+  } catch (err) {
+    if (!isExternalClient) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (!isExternalClient) client.release();
+  }
+}
+
+/**
+ * Cambia el estado de una suscripción activa.
+ * estados válidos: ACTIVA | SUSPENDIDA | CANCELADA | VENCIDA
+ */
+async function cambiarEstadoSuscripcion(empresaId, nuevoEstado, queryable = db) {
+  const ESTADOS = ['ACTIVA', 'TRIAL', 'SUSPENDIDA', 'CANCELADA', 'VENCIDA'];
+  if (!ESTADOS.includes(nuevoEstado)) {
+    throw Object.assign(new Error(`Estado inválido: ${nuevoEstado}`), { statusCode: 400 });
+  }
+
+  const { rows } = await queryable.query(`
+    UPDATE suscripciones
+    SET estado = $1, actualizado_en = NOW()
+    WHERE empresa_id = $2 AND estado IN ('TRIAL','ACTIVA')
+    RETURNING *
+  `, [nuevoEstado, empresaId]);
+
+  if (rows.length === 0) {
+    throw Object.assign(new Error('No hay suscripción activa para esta empresa.'), { statusCode: 404 });
+  }
+  return rows[0];
+}
+
+/**
+ * Suscripciones próximas a vencer (trial_hasta o fecha_fin dentro de N días).
+ */
+async function getProximasAVencer(dias = 30, queryable = db) {
+  const { rows } = await queryable.query(`
+    SELECT
+      s.id           AS suscripcion_id,
+      s.empresa_id,
+      s.estado,
+      s.fecha_fin,
+      s.trial_hasta,
+      p.codigo       AS plan_codigo,
+      p.nombre       AS plan_nombre,
+      p.precio_mensual,
+      e.nombre       AS empresa_nombre,
+      e.email_contacto,
+      e.ciudad,
+      EXTRACT(EPOCH FROM (
+        COALESCE(
+          CASE WHEN s.estado = 'TRIAL' THEN s.trial_hasta ELSE NULL END,
+          s.fecha_fin
+        ) - NOW()
+      )) / 86400 AS dias_restantes
+    FROM suscripciones s
+    JOIN planes   p ON p.id = s.plan_id
+    JOIN empresas e ON e.id = s.empresa_id
+    WHERE s.estado IN ('TRIAL','ACTIVA')
+      AND (
+        (s.estado = 'TRIAL'  AND s.trial_hasta IS NOT NULL
+          AND s.trial_hasta BETWEEN NOW() AND NOW() + ($1 || ' days')::INTERVAL)
+        OR
+        (s.estado = 'ACTIVA' AND s.fecha_fin IS NOT NULL
+          AND s.fecha_fin BETWEEN NOW() AND NOW() + ($1 || ' days')::INTERVAL)
+      )
+    ORDER BY COALESCE(
+      CASE WHEN s.estado = 'TRIAL' THEN s.trial_hasta ELSE NULL END,
+      s.fecha_fin
+    ) ASC
+  `, [dias]);
+  return rows;
+}
+
+/**
+ * Resumen SaaS para el dashboard del superadmin.
+ * Usa la nueva tabla suscripciones + planes.
+ */
+async function getResumenSaas(queryable = db) {
+  const { rows } = await queryable.query(`
+    SELECT
+      COUNT(*)                                              AS total,
+      COUNT(*) FILTER (WHERE s.estado = 'TRIAL')           AS trial,
+      COUNT(*) FILTER (WHERE s.estado = 'ACTIVA')          AS activas,
+      COUNT(*) FILTER (
+        WHERE s.estado = 'TRIAL'
+          AND s.trial_hasta IS NOT NULL
+          AND s.trial_hasta < NOW()
+      )                                                     AS trials_vencidos,
+      COUNT(*) FILTER (
+        WHERE s.estado = 'ACTIVA'
+          AND s.fecha_fin IS NOT NULL
+          AND s.fecha_fin < NOW()
+      )                                                     AS vencidas,
+      COALESCE(SUM(
+        CASE WHEN s.estado = 'ACTIVA' THEN s.precio_pactado ELSE 0 END
+      ), 0)                                                 AS mrr,
+      COALESCE(SUM(
+        CASE WHEN s.estado = 'ACTIVA' THEN s.precio_pactado * 12 ELSE 0 END
+      ), 0)                                                 AS arr
+    FROM suscripciones s
+    WHERE s.estado IN ('TRIAL','ACTIVA')
+  `);
+  return rows[0];
+}
+
+// ─────────────────────────────────────────────────────────────
+// EMPRESA_MODULOS — Sobreescrituras / add-ons por empresa
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Devuelve todos los módulos activos con su estado para una empresa concreta.
+ *
+ * estado posibles:
+ *   'incluido'    → el plan lo incluye y no está bloqueado por override
+ *   'addon'       → override activo pero el plan NO lo incluye
+ *   'desactivado' → override activo=FALSE (bloquea módulo del plan)
+ *   'no_incluido' → ni el plan ni override lo incluyen
+ */
+async function getModulosParaEmpresa(empresaId, queryable = db) {
+  const { rows } = await queryable.query(`
+    SELECT
+      m.id,
+      m.nombre,
+      m.descripcion,
+      m.icono_clave,
+      m.orden,
+      -- Override de empresa
+      em.id             IS NOT NULL   AS tiene_override,
+      em.activo                       AS override_activo,
+      em.limite_override,
+      em.notas                        AS override_notas,
+      -- ¿Está en el plan activo?
+      pm.id             IS NOT NULL   AS en_plan,
+      pm.limite_registros             AS limite_plan,
+      -- Estado efectivo calculado
+      CASE
+        WHEN em.id IS NOT NULL AND em.activo = TRUE  AND pm.id IS NULL     THEN 'addon'
+        WHEN em.id IS NOT NULL AND em.activo = FALSE                       THEN 'desactivado'
+        WHEN pm.id IS NOT NULL AND COALESCE(em.activo, TRUE) = TRUE        THEN 'incluido'
+        ELSE 'no_incluido'
+      END AS estado_efectivo
+    FROM modulos m
+    -- Suscripción activa de la empresa
+    LEFT JOIN suscripciones s
+      ON s.empresa_id = $1 AND s.estado IN ('TRIAL','ACTIVA')
+    LEFT JOIN plan_modulos pm
+      ON pm.plan_id = s.plan_id AND pm.modulo_id = m.id AND pm.activo = TRUE
+    LEFT JOIN empresa_modulos em
+      ON em.empresa_id = $1 AND em.modulo_id = m.id
+    WHERE m.activo = TRUE
+    ORDER BY m.orden NULLS LAST, m.nombre
+  `, [empresaId]);
+  return rows;
+}
+
+/**
+ * Crea o actualiza un override de módulo para una empresa.
+ *
+ * @param {number}  empresaId
+ * @param {number}  moduloId
+ * @param {boolean} activo          true = habilitar, false = deshabilitar
+ * @param {number}  [limiteOverride] null = heredar del plan, 0 = sin límite
+ * @param {string}  [notas]
+ */
+async function upsertModuloOverride(empresaId, moduloId, { activo = true, limiteOverride = null, notas = null } = {}, queryable = db) {
+  const { rows } = await queryable.query(`
+    INSERT INTO empresa_modulos (empresa_id, modulo_id, activo, limite_override, notas)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (empresa_id, modulo_id)
+    DO UPDATE SET
+      activo          = EXCLUDED.activo,
+      limite_override = EXCLUDED.limite_override,
+      notas           = EXCLUDED.notas,
+      actualizado_en  = NOW()
+    RETURNING *
+  `, [empresaId, moduloId, activo, limiteOverride, clean(notas)]);
+  return rows[0];
+}
+
+/** Elimina el override de un módulo (vuelve al comportamiento del plan). */
+async function removeModuloOverride(empresaId, moduloId, queryable = db) {
+  const { rowCount } = await queryable.query(
+    'DELETE FROM empresa_modulos WHERE empresa_id = $1 AND modulo_id = $2',
+    [empresaId, moduloId]
+  );
+  return rowCount > 0;
+}
+
+// ─────────────────────────────────────────────────────────────
+// USUARIOS DE TENANT
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Crea el usuario administrador inicial de un tenant existente.
+ * Verifica que el email sea único globalmente.
+ */
+async function crearAdminTenant(empresaId, { nombre, email, password, rol = 'Administrador' }, queryable = db) {
+  requireField(email, 'email');
+  requireField(password, 'password');
+  if (String(password).trim().length < 6) {
+    throw Object.assign(new Error('La contraseña debe tener al menos 6 caracteres.'), { statusCode: 400 });
+  }
+
+  const { rows: exist } = await queryable.query(
+    'SELECT id FROM usuarios WHERE LOWER(email) = LOWER($1) LIMIT 1', [email]
+  );
+  if (exist.length > 0) {
+    throw Object.assign(new Error('Ese correo ya está registrado.'), { statusCode: 409 });
+  }
+
+  const hash = await bcrypt.hash(String(password).trim(), 10);
+  const { rows } = await queryable.query(`
+    INSERT INTO usuarios (empresa_id, nombre, email, password_hash, rol)
+    VALUES ($1, $2, $3, $4, $5)
+    RETURNING id, empresa_id, nombre, email, rol, activo, creado_en
+  `, [empresaId, clean(nombre) || `Admin empresa ${empresaId}`, email, hash, rol]);
+  return rows[0];
+}
+
+module.exports = {
+  // Empresas
+  listarEmpresas,
+  getEmpresaCompleta,
+  onboardEmpresa,
+  // Planes y suscripciones
+  listarPlanes,
+  asignarPlan,
+  cambiarEstadoSuscripcion,
+  getProximasAVencer,
+  getResumenSaas,
+  // Módulos por empresa
+  getModulosParaEmpresa,
+  upsertModuloOverride,
+  removeModuloOverride,
+  // Usuarios de tenant
+  crearAdminTenant,
+};
