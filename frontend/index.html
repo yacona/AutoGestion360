@@ -5,7 +5,25 @@
   <title>Autogestión360 - Panel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="styles.css" />
-  <script defer src="app.js"></script>
+  <!-- Core (sin dependencias externas entre sí, orden importa) -->
+  <script defer src="js/core/storage.js"></script>
+  <script defer src="js/core/api.js"></script>
+  <script defer src="js/core/ui.js"></script>
+  <script defer src="js/core/auth.js"></script>
+  <script defer src="js/core/router.js"></script>
+  <!-- Módulos de feature -->
+  <script defer src="js/modules/dashboard.js"></script>
+  <script defer src="js/modules/parqueadero.js"></script>
+  <script defer src="js/modules/lavadero.js"></script>
+  <script defer src="js/modules/taller.js"></script>
+  <script defer src="js/modules/clientes.js"></script>
+  <script defer src="js/modules/empleados.js"></script>
+  <script defer src="js/modules/empresas.js"></script>
+  <script defer src="js/modules/usuarios.js"></script>
+  <script defer src="js/modules/configuracion.js"></script>
+  <script defer src="js/modules/reportes.js"></script>
+  <!-- Bootstrap -->
+  <script defer src="js/main.js"></script>
 </head>
 <body>
   <div id="app">

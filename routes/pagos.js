@@ -606,7 +606,7 @@ router.get("/parqueadero/:parqueadero_id", auth, async (req, res) => {
   try {
     await ensurePagosServiciosSchema();
 
-    const { rows: pagosServicios } = await db.query(
+    const { rows } = await db.query(
       `SELECT
          id,
          empresa_id,
@@ -627,37 +627,43 @@ router.get("/parqueadero/:parqueadero_id", auth, async (req, res) => {
       [empresa_id, parqueadero_id]
     );
 
-    if (pagosServicios.length > 0) {
-      return res.json(pagosServicios.map((row) => ({
-        ...row,
-        monto: toNumber(row.monto),
-      })));
-    }
-
-    const { rows } = await db.query(
-      `SELECT * FROM pagos_parqueadero WHERE parqueadero_id = $1 AND empresa_id = $2 ORDER BY creado_en DESC`,
-      [parqueadero_id, empresa_id]
-    );
-
-    res.json(rows);
+    res.json(rows.map((row) => ({ ...row, monto: toNumber(row.monto) })));
   } catch (err) {
     console.error("Error obteniendo pagos:", err);
     res.status(500).json({ error: "Error obteniendo pagos." });
   }
 });
 
-// GET pagos pendientes
+// GET servicios de parqueadero cerrados sin pago registrado
 router.get("/pendientes/listado", auth, async (req, res) => {
   const empresa_id = req.user.empresa_id;
 
   try {
+    await ensurePagosServiciosSchema();
+
     const { rows } = await db.query(
-      `SELECT pp.*, p.placa, c.nombre 
-       FROM pagos_parqueadero pp
-       JOIN parqueadero p ON p.id = pp.parqueadero_id
+      `SELECT
+         p.id,
+         p.placa,
+         p.tipo_vehiculo,
+         p.hora_entrada,
+         p.hora_salida,
+         COALESCE(p.valor_total, 0) AS monto,
+         p.estado_pago,
+         c.nombre AS nombre_cliente
+       FROM parqueadero p
        LEFT JOIN clientes c ON c.id = p.cliente_id
-       WHERE pp.empresa_id = $1 AND pp.estado = 'PENDIENTE'
-       ORDER BY pp.creado_en DESC`,
+       LEFT JOIN pagos_servicios ps ON ps.empresa_id = p.empresa_id
+         AND ps.modulo = 'parqueadero'
+         AND ps.referencia_id = p.id
+         AND ps.estado = 'APLICADO'
+       WHERE p.empresa_id = $1
+         AND p.hora_salida IS NOT NULL
+         AND ps.id IS NULL
+         AND COALESCE(p.valor_total, 0) > 0
+         AND COALESCE(p.estado_pago, '') NOT IN ('PAGADO', 'MENSUALIDAD')
+       ORDER BY p.hora_salida DESC
+       LIMIT 100`,
       [empresa_id]
     );
 
@@ -718,27 +724,11 @@ router.post("/", auth, async (req, res) => {
   }
 });
 
-// PATCH actualizar estado de pago
-router.patch("/:id", auth, async (req, res) => {
-  const empresa_id = req.user.empresa_id;
-  const id = req.params.id;
-  const { estado } = req.body;
-
-  try {
-    const { rows } = await db.query(
-      `UPDATE pagos_parqueadero SET estado = $1 WHERE id = $2 AND empresa_id = $3 RETURNING *`,
-      [estado, id, empresa_id]
-    );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "Pago no encontrado." });
-    }
-
-    res.json(rows[0]);
-  } catch (err) {
-    console.error("Error actualizando pago:", err);
-    res.status(500).json({ error: "Error actualizando pago." });
-  }
+// PATCH — endpoint legacy eliminado; usar POST /api/pagos/servicio para registrar pagos
+router.patch("/:id", auth, (req, res) => {
+  res.status(410).json({
+    error: "Endpoint eliminado. Use POST /api/pagos/servicio para registrar pagos.",
+  });
 });
 
 module.exports = router;
