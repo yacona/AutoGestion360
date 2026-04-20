@@ -1,112 +1,112 @@
-# Roadmap SaaS — AutoGestión360
+# Roadmap SaaS — AutoGestion360
 
-> Documento vivo. Actualizar al cerrar cada fase.  
-> Última revisión: 2026-04-16
+> Documento operativo posterior al Sprint 1
+> Última actualización: 2026-04-20
 
----
+## Norte del proyecto
 
-## Estado actual (Fase 0 — Estabilización)
+Convertir AutoGestion360 en un SaaS multiempresa operable, instalable desde cero, con control claro de planes, licencias, cobro, seguridad y despliegue.
 
-El sistema tiene funcionalidad completa para los módulos operativos core, pero acumula deuda técnica en el esquema de base de datos y en la capa de licenciamiento. El objetivo inmediato es estabilizar sin reescribir lógica de negocio.
+## Sprint 1 — Estabilización técnica del repositorio
 
-**Funcional hoy:**
-- Multi-empresa con aislamiento lógico por `empresa_id`.
-- Módulos: Parqueadero, Lavadero, Taller, Clientes, Vehículos, Empleados.
-- Arqueos de caja y reportes.
-- Sistema de licencias (tres generaciones coexistiendo).
-- Facturación SaaS básica (tablas creadas, flujo parcialmente implementado).
+### Objetivo
 
----
+Dejar una línea base coherente sin cambiar todavía el comportamiento funcional.
 
-## Fase 1 — Consolidación técnica (Prioridad: ALTA)
+### Entregables
 
-**Objetivo:** Eliminar inconsistencias que generan errores en producción.
+- inventario real de módulos y dependencias SQL
+- comparación backend vs `estructura.sql`
+- documentación de arquitectura actual
+- `.env.example` alineado con variables realmente usadas
+- `database/001_base_schema.sql` como esquema inicial consolidado
+- README con instalación y arranque desde cero
 
-| Tarea | Archivo afectado | Tipo |
-|-------|-----------------|------|
-| Eliminar referencias a `pagos_parqueadero` | `routes/pagos.js` | Bugfix |
-| Mover CREATE TABLE dinámicos a migrations SQL | `routes/alertas.js`, `routes/auditoria.js`, `routes/parqueadero.js`, `utils/parqueadero-config.js` | Refactor |
-| Eliminar CREATE TABLE duplicado de `arqueos_caja` | `routes/reportes.js` | Refactor |
-| Eliminar CREATE TABLE duplicado de `tarifas` | `utils/parqueadero-config.js` | Refactor |
-| Agregar `authMiddleware` a `/api/licencias` y `/api/suscripciones` | `server.js` | Seguridad |
-| Documentar decisión sobre `licenseMiddleware` en `/api/pagos` | `server.js` | Seguridad |
-| Consolidar sistema de licencias: declarar fuente de verdad | `middleware/licencia.js` | Refactor |
+### Resultado esperado
 
----
+- un desarrollador nuevo puede levantar el sistema sin depender de DDL en runtime ni de adivinar qué SQL ejecutar
+- el equipo entiende qué partes son activas y cuáles son legacy
 
-## Fase 2 — Migración de esquema ordenada (Prioridad: ALTA)
+## Sprint 2 — Unificación de esquema y contratos
 
-**Objetivo:** Un solo camino para inicializar la base de datos desde cero.
+### Objetivo
 
-| Tarea | Entregable |
-|-------|-----------|
-| Consolidar `estructura.sql` en `database/001_base_schema.sql` | `database/001_base_schema.sql` |
-| Extraer tablas dinámicas a `database/002_tablas_runtime.sql` | `database/002_tablas_runtime.sql` |
-| Script de inicialización en orden correcto | `scripts/init-db.sh` |
-| Agregar `database/README.md` con orden de ejecución | `database/README.md` |
-| Evaluar migrar a herramienta de migrations (node-pg-migrate o similar) | Decisión técnica |
+Reducir la ambigüedad entre modelo legacy y modelo SaaS nuevo.
 
----
+### Prioridades
 
-## Fase 3 — Hardening de seguridad (Prioridad: ALTA)
+1. declarar una sola fuente de verdad para suscripciones activas
+2. separar claramente tablas activas, tablas legacy y compatibilidades
+3. sacar del runtime el DDL restante
+4. documentar un flujo incremental de actualización para bases existentes
 
-**Objetivo:** Que el sistema sea seguro antes de recibir clientes reales.
+### Entregables sugeridos
 
-| Tarea | Descripción |
-|-------|-------------|
-| Rate limiting | `express-rate-limit` en `/api/login` y `/api/register` |
-| Helmet | Headers de seguridad HTTP |
-| Validación de inputs | `joi` o `zod` en todos los endpoints de mutación |
-| CORS restrictivo | Lista blanca de dominios en producción |
-| Variables de entorno en producción | Audit de `.env` — separar dev/prod |
-| Audit de autorización | Verificar que todos los handlers validan `empresa_id === req.user.empresa_id` |
+- `database/002_runtime_cleanup.sql` o migraciones equivalentes
+- desactivación controlada de creadores dinámicos de tablas
+- matriz de compatibilidad entre `suscripciones_empresa` y `suscripciones`
 
----
+## Sprint 3 — Hardening de backend
 
-## Fase 4 — Observabilidad (Prioridad: MEDIA)
+### Objetivo
 
-| Tarea | Descripción |
-|-------|-------------|
-| Logging estructurado | Reemplazar `console.log` con `pino` o `winston` |
-| Health check avanzado | `/api/health` con estado de DB |
-| Tabla `auditoria` como migración formal | Mover de runtime a migration SQL |
-| Alertas automáticas | Completar módulo `alertas` con triggers de negocio |
+Preparar la aplicación para operar con clientes reales.
 
----
+### Tareas
 
-## Fase 5 — SaaS multi-tenant producción (Prioridad: MEDIA)
+- rate limiting en login y registro
+- headers de seguridad con `helmet`
+- validación de payloads con `zod`
+- política CORS explícita
+- revisión completa de autorización por `empresa_id`
+- estrategia para retiro de `.env` del índice y rotación de secretos
 
-**Objetivo:** Habilitar self-service de empresas y cobro recurrente.
+## Sprint 4 — Consolidación SaaS
 
-| Tarea | Descripción |
-|-------|-------------|
-| Unificar sistema de licencias | Una sola fuente de verdad: `suscripciones_empresa` |
-| Integración de pasarela de pago | Wompi / Stripe según mercado objetivo |
-| Webhook de pago confirmado | Actualizar `suscripciones_empresa.estado` automáticamente |
-| Portal de auto-registro | Flujo completo: registro → trial → pago → activación |
-| Emails transaccionales | Bienvenida, vencimiento, renovación |
-| Dashboard de métricas SaaS | MRR, churn, conversión trial→pago |
+### Objetivo
 
----
+Cerrar la brecha entre el modelo funcional actual y un SaaS administrable.
 
-## Fase 6 — Escalabilidad (Prioridad: BAJA — futuro)
+### Tareas
 
-| Tarea | Descripción |
-|-------|-------------|
-| Connection pooling externo | PgBouncer en producción |
-| Caché de respuestas frecuentes | Redis para reportes y tarifas |
-| Workers asíncronos | Bull/BullMQ para emails y reportes pesados |
-| Multi-instancia | PM2 cluster o contenedores Docker |
-| CI/CD | GitHub Actions: lint + tests + deploy |
+- unificar control de acceso sobre `suscripciones + planes + plan_modulos + empresa_modulos`
+- redefinir el rol de `suscripciones_empresa` y `facturas_saas`
+- terminar migración del panel admin a `src/modules`
+- centralizar catálogo de módulos y límites por plan
+- definir flujo formal de upgrade/downgrade de plan
 
----
+## Sprint 5 — Cobro y operación comercial
 
-## Decisiones pendientes
+### Objetivo
 
-| Decisión | Opciones | Impacto |
-|----------|----------|---------|
-| ¿Usar herramienta de migrations? | node-pg-migrate, db-migrate, Flyway | Medio |
-| ¿Sistema de licencias definitivo? | Mantener relacional vs unificar con suscripciones | Alto |
-| ¿Aislar tenants en schemas PG distintos? | Schema por empresa vs row-level security | Alto |
-| ¿Pasarela de pago principal? | Wompi (Colombia) vs Stripe (internacional) | Alto |
-| ¿Framework de validación? | Joi vs Zod vs express-validator | Bajo |
+Habilitar el ciclo comercial completo del producto.
+
+### Tareas
+
+- integrar pasarela de pago
+- webhook de confirmación de pagos
+- suspensión automática por vencimiento
+- renovación y facturación
+- panel de métricas SaaS
+
+## Sprint 6 — Observabilidad y despliegue
+
+### Objetivo
+
+Tener una base más apta para producción.
+
+### Tareas
+
+- logging estructurado
+- health checks reales con estado de DB
+- backups y restore documentados
+- CI mínima
+- estrategia de deploy y rollback
+
+## Decisiones aún abiertas
+
+- si `suscripciones` reemplaza formalmente a `suscripciones_empresa`
+- si se adopta una herramienta de migrations
+- si el modelo multiempresa seguirá siendo solo por `empresa_id`
+- cuál pasarela será la principal
+- cómo versionar seeds y catálogos SaaS

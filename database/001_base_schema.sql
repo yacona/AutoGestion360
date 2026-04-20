@@ -1,16 +1,18 @@
 -- ============================================================
 -- AutoGestión360 — Schema base consolidado
 -- Versión: 001
--- Generado: 2026-04-16
+-- Generado: 2026-04-20
 --
--- Consolida: estructura.sql + todas las migrations/*.sql
+-- Consolida: estructura.sql + migrations/*.sql + database/002_saas_planes.sql
 -- Incluye también las tablas creadas dinámicamente en código.
 --
 -- INSTRUCCIONES DE USO:
 --   psql -U <usuario> -d autogestion360 -f database/001_base_schema.sql
 --
 -- REQUISITOS: la base de datos debe existir previamente.
--- Este script es idempotente (IF NOT EXISTS en todo).
+-- Este script sirve como base inicial consolidada para instalaciones nuevas.
+-- También es idempotente para re-ejecuciones, pero no reemplaza una estrategia
+-- formal de migración incremental desde dumps legacy ya existentes.
 -- ============================================================
 
 SET client_encoding = 'UTF8';
@@ -252,8 +254,16 @@ CREATE TABLE IF NOT EXISTS modulos (
     id          SERIAL PRIMARY KEY,
     nombre      VARCHAR(100) NOT NULL UNIQUE,
     descripcion TEXT,
+    activo      BOOLEAN NOT NULL DEFAULT TRUE,
+    orden       SMALLINT DEFAULT 0,
+    icono_clave VARCHAR(50),
     creado_en   TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE modulos
+    ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT TRUE,
+    ADD COLUMN IF NOT EXISTS orden SMALLINT DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS icono_clave VARCHAR(50);
 
 CREATE TABLE IF NOT EXISTS licencia_modulo (
     id          SERIAL PRIMARY KEY,
@@ -281,6 +291,18 @@ ALTER TABLE empresas ADD COLUMN IF NOT EXISTS
 
 -- NOTA: licencia_inicio y licencia_fin ya existen en empresas desde estructura.sql
 -- Se mantienen para el sistema legado. No se duplican.
+
+ALTER TABLE parqueadero
+    ADD COLUMN IF NOT EXISTS tipo_servicio VARCHAR(30) DEFAULT 'OCASIONAL_HORA',
+    ADD COLUMN IF NOT EXISTS mensualidad_id BIGINT;
+
+ALTER TABLE tarifas
+    ADD COLUMN IF NOT EXISTS valor_dia NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS fraccion_dia_minutos INTEGER,
+    ADD COLUMN IF NOT EXISTS valor_primera_fraccion NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS tiempo_primera_fraccion INTEGER,
+    ADD COLUMN IF NOT EXISTS valor_segunda_fraccion NUMERIC(12,2),
+    ADD COLUMN IF NOT EXISTS tiempo_segunda_fraccion INTEGER;
 
 
 -- ────────────────────────────────────────────
@@ -399,6 +421,91 @@ CREATE INDEX IF NOT EXISTS facturas_saas_estado_idx
 
 
 -- ────────────────────────────────────────────
+-- BLOQUE 5B: NÚCLEO SAAS NUEVO
+-- (antes en database/002_saas_planes.sql)
+-- ────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS planes (
+    id              SERIAL PRIMARY KEY,
+    codigo          VARCHAR(30)   NOT NULL UNIQUE,
+    nombre          VARCHAR(100)  NOT NULL,
+    descripcion     TEXT,
+    precio_mensual  NUMERIC(12,2) NOT NULL DEFAULT 0,
+    precio_anual    NUMERIC(12,2),
+    moneda          VARCHAR(10)   NOT NULL DEFAULT 'COP',
+    trial_dias      INTEGER       NOT NULL DEFAULT 14,
+    max_usuarios    INTEGER,
+    max_vehiculos   INTEGER,
+    max_empleados   INTEGER,
+    es_publico      BOOLEAN NOT NULL DEFAULT TRUE,
+    activo          BOOLEAN NOT NULL DEFAULT TRUE,
+    orden           SMALLINT      NOT NULL DEFAULT 0,
+    metadata        JSONB,
+    creado_en       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    actualizado_en  TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS plan_modulos (
+    id                  SERIAL PRIMARY KEY,
+    plan_id             INTEGER NOT NULL REFERENCES planes(id) ON DELETE CASCADE,
+    modulo_id           INTEGER NOT NULL REFERENCES modulos(id) ON DELETE CASCADE,
+    limite_registros    INTEGER,
+    activo              BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata            JSONB,
+    UNIQUE (plan_id, modulo_id)
+);
+
+CREATE INDEX IF NOT EXISTS plan_modulos_plan_idx
+    ON plan_modulos (plan_id)
+    WHERE activo = TRUE;
+
+CREATE TABLE IF NOT EXISTS suscripciones (
+    id                      BIGSERIAL PRIMARY KEY,
+    empresa_id              BIGINT      NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    plan_id                 INTEGER     NOT NULL REFERENCES planes(id)   ON DELETE RESTRICT,
+    estado                  VARCHAR(20) NOT NULL DEFAULT 'TRIAL',
+    fecha_inicio            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fecha_fin               TIMESTAMPTZ,
+    trial_hasta             TIMESTAMPTZ,
+    ciclo                   VARCHAR(10) NOT NULL DEFAULT 'MENSUAL',
+    renovacion_automatica   BOOLEAN     NOT NULL DEFAULT FALSE,
+    pasarela                VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
+    referencia_externa      VARCHAR(150),
+    precio_pactado          NUMERIC(12,2) NOT NULL DEFAULT 0,
+    moneda                  VARCHAR(10) NOT NULL DEFAULT 'COP',
+    observaciones           TEXT,
+    metadata                JSONB,
+    creado_en               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_en          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS suscripciones_empresa_activa_uniq
+    ON suscripciones (empresa_id)
+    WHERE estado IN ('TRIAL', 'ACTIVA');
+
+CREATE INDEX IF NOT EXISTS suscripciones_estado_fin_idx
+    ON suscripciones (estado, fecha_fin);
+
+CREATE INDEX IF NOT EXISTS suscripciones_empresa_hist_idx
+    ON suscripciones (empresa_id, creado_en DESC);
+
+CREATE TABLE IF NOT EXISTS empresa_modulos (
+    id              BIGSERIAL PRIMARY KEY,
+    empresa_id      BIGINT  NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    modulo_id       INTEGER NOT NULL REFERENCES modulos(id)  ON DELETE CASCADE,
+    activo          BOOLEAN NOT NULL DEFAULT TRUE,
+    limite_override INTEGER,
+    notas           TEXT,
+    creado_en       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_en  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (empresa_id, modulo_id)
+);
+
+CREATE INDEX IF NOT EXISTS empresa_modulos_empresa_idx
+    ON empresa_modulos (empresa_id);
+
+
+-- ────────────────────────────────────────────
 -- BLOQUE 6: TABLAS DINÁMICAS (extraídas del código JS)
 -- Antes creadas en runtime; ahora versionadas aquí.
 -- ────────────────────────────────────────────
@@ -510,38 +617,179 @@ CREATE OR REPLACE VIEW ordenes_taller AS
 
 
 -- ────────────────────────────────────────────
--- BLOQUE 8: DATOS SEMILLA — LICENCIAS Y MÓDULOS
--- (de licencias_setup.sql)
+-- BLOQUE 8: DATOS SEMILLA — LICENCIAS, MÓDULOS Y PLANES
 -- ────────────────────────────────────────────
 
 INSERT INTO licencias (nombre, descripcion, precio) VALUES
     ('Demo',    'Acceso de prueba — solo parqueadero', 0),
-    ('Básica',  'Parqueadero + Lavadero + Matrícula',  50),
+    ('Básica',  'Parqueadero + clientes + reportes básicos',  50),
+    ('Pro',     'Operación completa sin multi-empresa', 75),
     ('Premium', 'Acceso completo a todos los módulos', 100)
 ON CONFLICT (nombre) DO NOTHING;
 
-INSERT INTO modulos (nombre, descripcion) VALUES
-    ('parqueadero', 'Gestión de parqueadero'),
-    ('lavadero',    'Gestión de lavadero'),
-    ('taller',      'Gestión de taller mecánico'),
-    ('matricula',   'Gestión de matrículas'),
-    ('evaluacion',  'Módulo de evaluación')
-ON CONFLICT (nombre) DO NOTHING;
+INSERT INTO modulos (nombre, descripcion, activo, orden, icono_clave) VALUES
+    ('dashboard',    'Panel general de operación', TRUE, 0, 'layout-dashboard'),
+    ('parqueadero',  'Gestión de parqueadero', TRUE, 1, 'car'),
+    ('lavadero',     'Gestión de lavadero', TRUE, 2, 'droplets'),
+    ('taller',       'Gestión de taller mecánico', TRUE, 3, 'wrench'),
+    ('clientes',     'Gestión de clientes y vehículos', TRUE, 4, 'users'),
+    ('empleados',    'Gestión de empleados y equipo', TRUE, 5, 'user-check'),
+    ('reportes',     'Reportes e indicadores de gestión', TRUE, 6, 'bar-chart-2'),
+    ('configuracion','Configuración de empresa y tarifas', TRUE, 7, 'settings'),
+    ('usuarios',     'Usuarios y roles de acceso', TRUE, 8, 'shield'),
+    ('empresas',     'Administración multiempresa SaaS', TRUE, 9, 'building-2'),
+    ('matricula',    'Módulo legacy de matrículas', FALSE, 10, 'id-card'),
+    ('evaluacion',   'Módulo legacy de evaluación', FALSE, 11, 'clipboard-list')
+ON CONFLICT (nombre) DO UPDATE
+    SET descripcion = EXCLUDED.descripcion,
+        activo = EXCLUDED.activo,
+        orden = EXCLUDED.orden,
+        icono_clave = EXCLUDED.icono_clave;
 
 -- Módulos por licencia
 INSERT INTO licencia_modulo (licencia_id, modulo_id)
 SELECT l.id, m.id FROM licencias l, modulos m
-WHERE l.nombre = 'Demo' AND m.nombre = 'parqueadero'
+WHERE l.nombre = 'Demo' AND m.nombre IN ('dashboard', 'parqueadero', 'clientes')
 ON CONFLICT DO NOTHING;
 
 INSERT INTO licencia_modulo (licencia_id, modulo_id)
 SELECT l.id, m.id FROM licencias l, modulos m
-WHERE l.nombre = 'Básica' AND m.nombre IN ('parqueadero','lavadero','matricula')
+WHERE l.nombre = 'Básica' AND m.nombre IN ('dashboard', 'parqueadero', 'clientes', 'reportes', 'configuracion')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO licencia_modulo (licencia_id, modulo_id)
+SELECT l.id, m.id FROM licencias l, modulos m
+WHERE l.nombre = 'Pro'
+  AND m.nombre IN (
+      'dashboard', 'parqueadero', 'lavadero', 'taller',
+      'clientes', 'empleados', 'reportes', 'configuracion', 'usuarios'
+  )
 ON CONFLICT DO NOTHING;
 
 INSERT INTO licencia_modulo (licencia_id, modulo_id)
 SELECT l.id, m.id FROM licencias l, modulos m
 WHERE l.nombre = 'Premium'
+  AND m.nombre IN (
+      'dashboard', 'parqueadero', 'lavadero', 'taller',
+      'clientes', 'empleados', 'reportes', 'configuracion',
+      'usuarios', 'empresas'
+  )
+ON CONFLICT DO NOTHING;
+
+INSERT INTO planes (codigo, nombre, descripcion, precio_mensual, precio_anual, moneda, trial_dias,
+                    max_usuarios, max_vehiculos, max_empleados, es_publico, activo, orden)
+VALUES
+    ('starter',
+     'Starter',
+     'Ideal para parqueaderos pequeños. Incluye parqueadero, clientes y reportes básicos.',
+     49900, 479000, 'COP', 14,
+     3, 500, 5,
+     TRUE, TRUE, 1),
+    ('pro',
+     'Pro',
+     'Para negocios en crecimiento. Parqueadero, lavadero, taller y equipo completo.',
+     99900, 959000, 'COP', 14,
+     10, NULL, NULL,
+     TRUE, TRUE, 2),
+    ('enterprise',
+     'Enterprise',
+     'Plataforma completa con administración multiempresa y módulos ilimitados.',
+     199900, 1919000, 'COP', 30,
+     NULL, NULL, NULL,
+     TRUE, TRUE, 3)
+ON CONFLICT (codigo) DO UPDATE
+    SET nombre = EXCLUDED.nombre,
+        descripcion = EXCLUDED.descripcion,
+        precio_mensual = EXCLUDED.precio_mensual,
+        precio_anual = EXCLUDED.precio_anual,
+        trial_dias = EXCLUDED.trial_dias,
+        max_usuarios = EXCLUDED.max_usuarios,
+        max_vehiculos = EXCLUDED.max_vehiculos,
+        max_empleados = EXCLUDED.max_empleados,
+        activo = EXCLUDED.activo,
+        actualizado_en = NOW();
+
+INSERT INTO plan_modulos (plan_id, modulo_id, limite_registros, activo)
+SELECT p.id, m.id,
+    CASE m.nombre
+        WHEN 'reportes' THEN 90
+        ELSE NULL
+    END,
+    TRUE
+FROM planes p, modulos m
+WHERE p.codigo = 'starter'
+  AND m.nombre IN ('dashboard', 'parqueadero', 'clientes', 'configuracion', 'reportes')
+ON CONFLICT (plan_id, modulo_id) DO UPDATE
+    SET limite_registros = EXCLUDED.limite_registros,
+        activo = EXCLUDED.activo;
+
+INSERT INTO plan_modulos (plan_id, modulo_id, limite_registros, activo)
+SELECT p.id, m.id, NULL, TRUE
+FROM planes p, modulos m
+WHERE p.codigo = 'pro'
+  AND m.nombre IN (
+      'dashboard', 'parqueadero', 'lavadero', 'taller',
+      'clientes', 'empleados', 'reportes', 'configuracion', 'usuarios'
+  )
+ON CONFLICT (plan_id, modulo_id) DO UPDATE
+    SET limite_registros = EXCLUDED.limite_registros,
+        activo = EXCLUDED.activo;
+
+INSERT INTO plan_modulos (plan_id, modulo_id, limite_registros, activo)
+SELECT p.id, m.id, NULL, TRUE
+FROM planes p, modulos m
+WHERE p.codigo = 'enterprise'
+  AND m.nombre IN (
+      'dashboard', 'parqueadero', 'lavadero', 'taller',
+      'clientes', 'empleados', 'reportes', 'configuracion',
+      'usuarios', 'empresas'
+  )
+ON CONFLICT (plan_id, modulo_id) DO UPDATE
+    SET limite_registros = EXCLUDED.limite_registros,
+        activo = EXCLUDED.activo;
+
+INSERT INTO suscripciones (
+    empresa_id, plan_id, estado, fecha_inicio, fecha_fin,
+    trial_hasta, ciclo, renovacion_automatica, pasarela,
+    precio_pactado, moneda, observaciones, creado_en, actualizado_en
+)
+SELECT
+    se.empresa_id,
+    COALESCE(
+        (SELECT p.id
+         FROM planes p
+         WHERE p.codigo = CASE
+             WHEN LOWER(COALESCE(l.nombre, 'demo')) LIKE '%premium%' THEN 'enterprise'
+             WHEN LOWER(COALESCE(l.nombre, 'demo')) LIKE '%pro%' THEN 'pro'
+             ELSE 'starter'
+         END
+         LIMIT 1),
+        (SELECT id FROM planes WHERE codigo = 'starter' LIMIT 1)
+    ),
+    se.estado,
+    se.fecha_inicio,
+    se.fecha_fin,
+    CASE
+        WHEN se.estado = 'TRIAL' AND se.fecha_fin IS NULL
+        THEN se.fecha_inicio + INTERVAL '14 days'
+        ELSE NULL
+    END,
+    'MENSUAL',
+    se.renovacion_automatica,
+    se.pasarela,
+    se.precio_plan,
+    se.moneda,
+    'Migrada automáticamente desde suscripciones_empresa',
+    se.creado_en,
+    se.actualizado_en
+FROM suscripciones_empresa se
+LEFT JOIN licencias l ON l.id = se.licencia_id
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM suscripciones s2
+    WHERE s2.empresa_id = se.empresa_id
+      AND s2.estado IN ('TRIAL', 'ACTIVA')
+)
 ON CONFLICT DO NOTHING;
 
 -- ============================================================

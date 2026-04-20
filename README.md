@@ -1,194 +1,215 @@
-# AutoGestión360
+# AutoGestion360
 
-Backend SaaS multi-empresa para gestión de parqueaderos, lavaderos y talleres automotrices.
+AutoGestion360 es un backend SaaS multi-empresa para operar parqueadero, lavadero, taller, clientes, empleados, usuarios y control administrativo desde una sola base PostgreSQL.
 
-**Stack:** Node.js 18 · Express 4 · PostgreSQL 14 · JWT · bcryptjs
+Sprint 1 deja una base técnica más estable sin cambiar todavía el modelo funcional: se documenta la arquitectura real, se consolida el esquema inicial y se define un camino de arranque limpio desde cero.
 
----
+## Estado actual del repositorio
+
+- Runtime principal: `server.js` -> `src/app.js`
+- Backend: Node.js + Express + PostgreSQL + JWT
+- Frontend: SPA servida como estáticos desde `frontend/`
+- Multiempresa: aislamiento lógico por `empresa_id`
+- Fuente de verdad para instalaciones nuevas: `database/001_base_schema.sql`
+- Archivos legacy que se conservan como referencia: `estructura.sql`, `migrations/`, `database/002_saas_planes.sql`
 
 ## Requisitos
 
-- Node.js >= 18
-- PostgreSQL >= 14
-- npm >= 9
-
----
+- Node.js 18 o superior
+- npm 9 o superior
+- PostgreSQL 14 o superior
 
 ## Instalación desde cero
 
-### 1. Clonar y configurar entorno
+### 1. Clonar e instalar dependencias
 
 ```bash
 git clone <repo>
 cd auto360
 npm install
-cp .env.example .env
-# Editar .env con tus credenciales reales
 ```
 
 ### 2. Crear la base de datos
 
 ```bash
 psql -U postgres -c "CREATE DATABASE autogestion360;"
-psql -U postgres -c "CREATE USER tu_usuario WITH PASSWORD 'tu_password';"
-psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE autogestion360 TO tu_usuario;"
 ```
 
-### 3. Inicializar el esquema
-
-El esquema completo está consolidado en dos archivos. Ejecutar en orden:
+Si vas a usar un usuario dedicado:
 
 ```bash
-# Esquema base completo (tablas, índices, seeds de licencias y módulos)
-psql -U tu_usuario -d autogestion360 -f database/001_base_schema.sql
-
-# Sistema SaaS: planes, suscripciones, empresa_modulos (ejecutar solo si usas el núcleo SaaS nuevo)
-psql -U tu_usuario -d autogestion360 -f database/002_saas_planes.sql
+psql -U postgres -c "CREATE USER autogestion360 WITH PASSWORD 'cambia_esta_clave';"
+psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE autogestion360 TO autogestion360;"
 ```
 
-> Los archivos en `migrations/` y `estructura.sql` son referencia histórica. No correrlos en instalaciones nuevas.
-
-### 4. Crear el primer SuperAdmin
+### 3. Configurar variables de entorno
 
 ```bash
-node scripts/promote-superadmin.js
+cp .env.example .env
 ```
 
-### 5. Iniciar el servidor
+Editar `.env` con tus credenciales reales.
+
+### 4. Inicializar el esquema
+
+Para instalaciones nuevas ejecutar solo:
 
 ```bash
-npm run dev   # desarrollo (nodemon)
-npm start     # producción
+psql -U autogestion360 -d autogestion360 -f database/001_base_schema.sql
 ```
 
-Disponible en `http://localhost:4000` (o el `PORT` definido en `.env`).
+Notas:
 
----
+- `database/001_base_schema.sql` ya incluye tablas core, licencias, suscripciones legacy, núcleo SaaS (`planes`, `plan_modulos`, `suscripciones`, `empresa_modulos`), tablas creadas antes en runtime, vistas de compatibilidad y seeds mínimos.
+- `database/002_saas_planes.sql` se conserva como migración histórica para instalaciones viejas. No es necesario en un bootstrap nuevo.
+- `estructura.sql` y `migrations/` son referencia histórica, no la ruta recomendada de inicialización.
 
-## Endpoints principales
+### 5. Crear o promover el primer SuperAdmin
 
-Todas las rutas privadas requieren `Authorization: Bearer <token>`.
+```bash
+npm run promote:superadmin
+```
 
-### Operaciones
+### 6. Iniciar el servidor
 
-| Método | Ruta | Módulo | Notas |
-|--------|------|--------|-------|
-| POST | `/api/login` | auth | Retorna JWT |
-| POST | `/api/register` | auth | Crea empresa + admin |
-| GET | `/api/ping` | — | Health check |
-| `*` | `/api/parqueadero` | parqueadero | Entradas/salidas, mensualidades |
-| `*` | `/api/tarifas` | configuracion | Tarifas por tipo de vehículo |
-| `*` | `/api/lavadero` | lavadero | Órdenes y tipos de lavado |
-| `*` | `/api/taller` | taller | Órdenes e ítems de taller |
-| `*` | `/api/clientes` | clientes | CRUD + historial 360 |
-| `*` | `/api/vehiculos` | parqueadero | CRUD + perfil 360 |
-| `*` | `/api/empleados` | empleados | CRUD con soft-delete |
-| `*` | `/api/pagos` | — | Cartera, recibos, registro de pagos |
-| `*` | `/api/reportes` | reportes | Reportes generales |
-| `*` | `/api/reportes/parqueadero` | reportes | Arqueos de caja |
-| `*` | `/api/alertas` | — | Alertas inteligentes + gestión |
-| `*` | `/api/auditoria` | — | Log de acciones |
-| `*` | `/api/configuracion` | configuracion | Config de parqueadero y reglas |
-| `*` | `/api/empresas` | empresas | CRUD empresas (SuperAdmin) |
-| `*` | `/api/usuarios` | usuarios | CRUD usuarios + roles |
-| `*` | `/api/licencias` | — | Catálogo licencias (SuperAdmin) |
-| `*` | `/api/suscripciones` | — | Suscripciones SaaS (SuperAdmin) |
-| `*` | `/api/admin` | — | Panel SaaS: planes, onboarding (SuperAdmin) |
-| `*` | `/api/admin/empresa-modulos` | — | Overrides de módulos por empresa (SuperAdmin) |
+```bash
+npm run dev
+```
 
----
+o en modo normal:
+
+```bash
+npm start
+```
+
+Servidor disponible en:
+
+```text
+http://localhost:4000
+```
+
+## Scripts disponibles
+
+```bash
+npm run dev
+npm start
+npm run promote:superadmin
+```
+
+## Arquitectura activa
+
+La aplicación usa una arquitectura híbrida:
+
+- `src/modules/*`: módulos refactorizados con patrón `routes -> controller -> service`
+- `routes/reportes.js`: módulo legacy aún montado
+- `routes/admin/*`: panel SaaS legacy aún montado, apoyado por `services/adminService.js`
+
+Rutas principales montadas hoy en `src/app.js`:
+
+- `/api` -> autenticación
+- `/api/parqueadero`
+- `/api/tarifas`
+- `/api/reportes/parqueadero`
+- `/api/clientes`
+- `/api/vehiculos`
+- `/api/empleados`
+- `/api/lavadero`
+- `/api/taller`
+- `/api/reportes`
+- `/api/pagos`
+- `/api/alertas`
+- `/api/auditoria`
+- `/api/configuracion`
+- `/api/empresas`
+- `/api/usuarios`
+- `/api/licencias`
+- `/api/suscripciones`
+- `/api/admin`
+- `/api/admin/empresa-modulos`
 
 ## Estructura del proyecto
 
-```
+```text
 auto360/
-├── src/
-│   ├── app.js                  # Configuración Express, registro de rutas
-│   ├── lib/
-│   │   ├── AppError.js         # Error operacional base
-│   │   ├── helpers.js          # normalizeRole, normalizarPlaca, toNumber…
-│   │   └── withTransaction.js  # Helper BEGIN/COMMIT/ROLLBACK
-│   ├── middlewares/
-│   │   └── errorHandler.js     # Manejador central de errores
-│   └── modules/                # Un directorio por dominio de negocio
-│       ├── auth/               # routes · controller · service
-│       ├── parqueadero/
-│       ├── tarifas/
-│       ├── reportes-parqueadero/
-│       ├── clientes/
-│       ├── vehiculos/
-│       ├── empleados/
-│       ├── lavadero/
-│       ├── taller/
-│       ├── pagos/
-│       ├── alertas/
-│       ├── auditoria/
-│       ├── configuracion/
-│       ├── empresas/
-│       ├── usuarios/
-│       ├── licencias/
-│       └── suscripciones/
-├── routes/                     # Legacy — solo routes/reportes.js activo
-│   └── admin/                  # Panel SaaS admin (pendiente de migrar)
-├── services/
-│   ├── adminService.js         # Lógica del panel SaaS (planes + onboarding)
-│   └── licenseService.js       # Cadena de resolución de licencias (3 niveles)
-├── middleware/
-│   ├── auth.js                 # Verificación JWT → req.user
-│   └── licencia.js             # Verificación de acceso a módulo
-├── utils/                      # Helpers transversales y schemas dinámicos
-│   ├── parqueadero-config.js
-│   ├── pagos-servicios.js
-│   ├── suscripciones-schema.js
-│   └── licencias-schema.js
 ├── database/
-│   ├── 001_base_schema.sql     # Esquema completo consolidado (idempotente)
-│   └── 002_saas_planes.sql     # Núcleo SaaS: planes, suscripciones, empresa_modulos
-├── migrations/                 # Histórico — no usar en instalaciones nuevas
-├── scripts/
-│   └── promote-superadmin.js
-├── frontend/                   # SPA servida como estáticos
-├── uploads/                    # Archivos subidos (multer)
+│   ├── 001_base_schema.sql
+│   └── 002_saas_planes.sql
 ├── docs/
 │   ├── arquitectura-actual.md
 │   └── roadmap-saas.md
-├── db.js                       # Pool pg
-└── server.js                   # Punto de entrada
+├── frontend/
+├── middleware/
+├── migrations/
+├── routes/
+├── scripts/
+├── services/
+├── src/
+│   ├── app.js
+│   ├── lib/
+│   ├── middlewares/
+│   └── modules/
+├── utils/
+├── db.js
+├── estructura.sql
+├── package.json
+└── server.js
 ```
 
----
+## Dependencias SQL reales del backend
 
-## Sistema de licencias
+Tablas usadas hoy por el backend montado:
 
-El sistema resuelve el acceso a módulos en tres niveles (de mayor a menor prioridad):
+- `alertas`
+- `arqueos_caja`
+- `auditoria`
+- `clientes`
+- `configuracion_parqueadero`
+- `empleados`
+- `empresa_licencia`
+- `empresa_modulos`
+- `empresas`
+- `facturas_saas`
+- `lavadero`
+- `licencia_modulo`
+- `licencias`
+- `mensualidades_parqueadero`
+- `modulos`
+- `pagos_servicios`
+- `parqueadero`
+- `plan_modulos`
+- `planes`
+- `reglas_parqueadero`
+- `suscripciones`
+- `suscripciones_empresa`
+- `taller_items`
+- `taller_ordenes`
+- `tarifas`
+- `tipos_lavado`
+- `usuarios`
+- `vehiculos`
 
-1. **Planes SaaS** (`suscripciones` + `planes` + `plan_modulos` + `empresa_modulos`) — sistema nuevo
-2. **Licencias clásicas** (`empresa_licencia` + `licencias` + `licencia_modulo`) — sistema relacional
-3. **Legacy** (`empresas.licencia_tipo`) — string hardcodeado, sin fecha de expiración real
+Vista de compatibilidad todavía usada indirectamente:
 
-Ver `services/licenseService.js` y `middleware/licencia.js`.
+- `ordenes_taller`
 
----
+## Decisiones de Sprint 1
 
-## Notas de seguridad
+- `database/001_base_schema.sql` pasa a ser el esquema inicial consolidado.
+- La documentación separa con claridad lo activo de lo legacy.
+- No se elimina lógica de negocio ni módulos funcionales.
+- No se migra todavía a otro framework ni a una herramienta formal de migrations.
 
-- `JWT_SECRET` debe ser una cadena aleatoria de mínimo 64 caracteres en producción.
-- `.env` **nunca debe commitearse**. Verificar `.gitignore`.
-- Los endpoints de `licencias` y `suscripciones` aplican `authMiddleware` + guard `superadmin`.
-- `/api/pagos` no usa `licenseMiddleware` por diseño: los pagos son transversales a todos los módulos. El acceso ya está controlado por `authMiddleware` y la licencia del módulo de origen.
+## Riesgos conocidos
 
----
+- Coexisten dos sistemas de suscripción: `suscripciones_empresa` y `suscripciones`.
+- Aún hay DDL en runtime en algunos helpers y rutas legacy.
+- `.env` aparece rastreado por git en el estado actual del repositorio y debe retirarse del índice antes de publicar o compartir el proyecto.
 
-## Roles
+## Documentación complementaria
 
-| Rol | Alcance |
-|-----|---------|
-| `operador` | Módulos habilitados de su empresa |
-| `admin` | Empresa completa |
-| `superadmin` | Todas las empresas, licencias y suscripciones |
-
----
+- `docs/arquitectura-actual.md`
+- `docs/roadmap-saas.md`
 
 ## Licencia
 
-Propietario — Victor Alfonso Mena Córdoba
+Uso propietario.
