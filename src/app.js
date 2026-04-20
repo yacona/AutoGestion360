@@ -7,27 +7,27 @@ const authMiddleware = require('../middleware/auth');
 const licenseMiddleware = require('../middleware/licencia');
 const errorHandler = require('./middlewares/errorHandler');
 
-// ── Módulos refactorizados (routes → controllers → services → repositories) ──
-const authRoutes = require('./modules/auth/auth.routes');
-const parqueaderoRoutes = require('./modules/parqueadero/parqueadero.routes');
-const tarifasRoutes = require('./modules/tarifas/tarifas.routes');
+// ── Módulos refactorizados ────────────────────────────────────────────────────
+const authRoutes               = require('./modules/auth/auth.routes');
+const parqueaderoRoutes        = require('./modules/parqueadero/parqueadero.routes');
+const tarifasRoutes            = require('./modules/tarifas/tarifas.routes');
 const reportesParqueaderoRoutes = require('./modules/reportes-parqueadero/reportes-parqueadero.routes');
+const clientesRoutes           = require('./modules/clientes/clientes.routes');
+const vehiculosRoutes          = require('./modules/vehiculos/vehiculos.routes');
+const empleadosRoutes          = require('./modules/empleados/empleados.routes');
+const lavaderoRoutes           = require('./modules/lavadero/lavadero.routes');
+const tallerRoutes             = require('./modules/taller/taller.routes');
+const pagosRoutes              = require('./modules/pagos/pagos.routes');
+const alertasRoutes            = require('./modules/alertas/alertas.routes');
+const auditoriaRoutes          = require('./modules/auditoria/auditoria.routes');
+const configuracionRoutes      = require('./modules/configuracion/configuracion.routes');
+const empresasRoutes           = require('./modules/empresas/empresas.routes');
+const usuariosRoutes           = require('./modules/usuarios/usuarios.routes');
+const licenciasRoutes          = require('./modules/licencias/licencias.routes');
+const suscripcionesRoutes      = require('./modules/suscripciones/suscripciones.routes');
 
-// ── Módulos legacy (aún no migrados) ─────────────────────────────────────────
-const clientesRoutes = require('../routes/clientes');
-const vehiculosRoutes = require('../routes/vehiculos');
-const empleadosRoutes = require('../routes/empleados');
-const lavaderoRoutes = require('../routes/lavadero');
-const tallerRoutes = require('../routes/taller');
+// ── Módulo legacy sin migrar ──────────────────────────────────────────────────
 const reportesRoutes = require('../routes/reportes');
-const pagosRoutes = require('../routes/pagos');
-const alertasRoutes = require('../routes/alertas');
-const auditoriaRoutes = require('../routes/auditoria');
-const configuracionRoutes = require('../routes/configuracion');
-const empresasRoutes = require('../routes/empresas');
-const usuariosRoutes = require('../routes/usuarios');
-const licenciasRoutes = require('../routes/licencias');
-const suscripcionesRoutes = require('../routes/suscripciones');
 
 // ── Panel SuperAdmin (sistema nuevo planes/suscripciones) ────────────────────
 const adminPlanesRoutes      = require('../routes/admin/planes-admin');

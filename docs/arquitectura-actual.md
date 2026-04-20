@@ -1,260 +1,286 @@
 # Arquitectura actual — AutoGestión360
 
-> Estado al: 2026-04-16  
-> Revisado por: análisis estático del código fuente
+> Estado al: 2026-04-18
+> Revisado por: análisis estático completo del código fuente
 
 ---
 
 ## 1. Visión general
 
-AutoGestión360 es un backend SaaS multi-empresa que expone una API REST consumida por un SPA (carpeta `frontend/`). Cada empresa tiene un tenant lógico identificado por `empresa_id`; no hay aislamiento físico de datos entre tenants.
+AutoGestión360 es una API REST SaaS multi-empresa consumida por un SPA (`frontend/`). Cada empresa tiene un **tenant lógico** identificado por `empresa_id`; no hay aislamiento físico (schemas PG separados, RLS) entre tenants.
 
 ```
-[SPA / frontend]  ←→  [Express 4 — puerto 4000]  ←→  [PostgreSQL 14]
+[SPA / frontend]  ←→  [Express 4 — src/app.js — puerto 4000]  ←→  [PostgreSQL 14]
 ```
+
+El punto de entrada es `server.js`, que delega toda la configuración a `src/app.js`.
 
 ---
 
 ## 2. Capas del sistema
 
-### 2.1 Servidor (`server.js`)
+### 2.1 Routing (`src/app.js`)
 
-- Carga variables de entorno con `dotenv`.
-- Registra 18 routers bajo el prefijo `/api/`.
-- Aplica `authMiddleware` (JWT) en todas las rutas privadas.
-- Aplica `licenseMiddleware(modulo)` por ruta según el módulo que habilita.
-- Sirve el frontend como archivos estáticos de `frontend/`.
-- Sirve `uploads/` como estáticos bajo `/uploads`.
+Todos los módulos están migrados al patrón `routes → controller → service`:
 
-### 2.2 Autenticación (`middleware/auth.js`)
+```
+src/modules/<dominio>/
+  <dominio>.routes.js      # define los endpoints Express
+  <dominio>.controller.js  # delega a service, wrap() para async errors
+  <dominio>.service.js     # SQL + lógica de negocio
+```
 
-- Valida token JWT en el header `Authorization: Bearer <token>`.
-- Inyecta `req.user` con `{ id, empresa_id, rol, ... }`.
+Excepción activa: `routes/reportes.js` y `routes/admin/` siguen siendo legacy (sin migrar).
 
-### 2.3 Licenciamiento (`middleware/licencia.js`)
+### 2.2 Infraestructura compartida (`src/lib/`)
 
-Verifica en este orden si la empresa tiene acceso al módulo solicitado:
+| Archivo | Propósito |
+|---------|-----------|
+| `AppError.js` | Error operacional con `statusCode` + `isOperational` |
+| `withTransaction.js` | Wrapper `BEGIN/COMMIT/ROLLBACK` que libera el cliente siempre |
+| `helpers.js` | `normalizeRole`, `isSuperAdmin`, `canManageUsers`, `normalizarPlaca`, `toNumber`, `cleanText`, `tableExists`, `handleDbError` |
 
-1. Tabla `empresa_licencia` (sistema nuevo, relacional).
-2. Columna `empresas.licencia_id` (atajos del sistema nuevo).
-3. Columna `empresas.licencia_tipo` (sistema legado — string hardcodeado).
+**Advertencia:** existe duplicación con `src/utils/`:
+- `src/utils/errors.js` — AppError con subclases (`NotFoundError`, `ValidationError`, etc.) no usadas por los módulos
+- `src/utils/transaction.js` — misma lógica que `src/lib/withTransaction.js`, exporta `{ withTransaction }` en lugar de la función directa
+- `src/utils/normalizers.js` — solapa parcialmente con `src/lib/helpers.js`
 
-Ver sección de inconsistencias para el riesgo de esta lógica triple.
+Acción recomendada: consolidar en `src/lib/`, eliminar `src/utils/errors.js`, `src/utils/transaction.js`, `src/utils/normalizers.js`.
 
-### 2.4 Base de datos (`db.js`)
+### 2.3 Autenticación (`middleware/auth.js`)
 
-Pool de conexión `pg` configurado con variables de entorno `DB_*`. No hay ORM.
+Valida JWT en `Authorization: Bearer <token>`, inyecta `req.user = { id, empresa_id, rol }`.
+
+### 2.4 Licenciamiento (`middleware/licencia.js` + `services/licenseService.js`)
+
+`licenseService.getLicenseStatus(empresaId)` resuelve en tres niveles (fallback en cascada):
+
+```
+1. suscripciones + planes + plan_modulos + empresa_modulos  → fuente: 'planes'
+2. empresa_licencia + licencias + licencia_modulo           → fuente: 'licencias'
+3. empresas.licencia_tipo (string hardcodeado)              → fuente: 'legacy'
+```
+
+`licenseMiddleware(modulo)` llama a `getLicenseStatus` y corta la cadena en el primer nivel que tiene datos. Los SuperAdmin bypasan toda verificación.
+
+### 2.5 Base de datos (`db.js`)
+
+Pool `pg` configurado con `DB_*` vars. No hay ORM. Queries SQL directas en los services.
 
 ---
 
 ## 3. Módulos de negocio
 
-| Módulo | Router | Tablas principales |
-|--------|--------|--------------------|
-| Parqueadero | `routes/parqueadero.js` | `parqueadero`, `mensualidades_parqueadero`* |
-| Lavadero | `routes/lavadero.js` | `lavadero`, `tipos_lavado` |
-| Taller | `routes/taller.js` | `taller_ordenes`, `taller_items` |
-| Clientes | `routes/clientes.js` | `clientes` |
-| Vehículos | `routes/vehiculos.js` | `vehiculos` |
-| Empleados | `routes/empleados.js` | `empleados` |
-| Tarifas | `routes/tarifas.js` | `tarifas` |
-| Pagos | `routes/pagos.js` | `pagos_servicios` |
-| Reportes | `routes/reportes.js` | (agrega múltiples tablas) |
-| Reportes parqueadero | `routes/reportes-parqueadero.js` | `parqueadero`, `arqueos_caja` |
-| Alertas | `routes/alertas.js` | `alertas`* |
-| Auditoría | `routes/auditoria.js` | `auditoria`* |
-| Configuración | `routes/configuracion.js` | `configuracion_parqueadero`*, `reglas_parqueadero`* |
-| Licencias | `routes/licencias.js` | `licencias`, `modulos`, `licencia_modulo`, `empresa_licencia` |
-| Suscripciones | `routes/suscripciones.js` | `suscripciones_empresa`, `facturas_saas` |
-| Empresas | `routes/empresas.js` | `empresas` |
-| Usuarios | `routes/usuarios.js` | `usuarios` |
-
-`*` Tabla creada dinámicamente en código mediante `CREATE TABLE IF NOT EXISTS` al iniciar el módulo.
+| Módulo | Ubicación | Tablas principales |
+|--------|-----------|-------------------|
+| auth | `src/modules/auth/` | `usuarios`, `empresas` |
+| parqueadero | `src/modules/parqueadero/` | `parqueadero`, `mensualidades_parqueadero` |
+| tarifas | `src/modules/tarifas/` | `tarifas` |
+| reportes-parqueadero | `src/modules/reportes-parqueadero/` | `parqueadero`, `arqueos_caja` |
+| clientes | `src/modules/clientes/` | `clientes` |
+| vehiculos | `src/modules/vehiculos/` | `vehiculos` |
+| empleados | `src/modules/empleados/` | `empleados` |
+| lavadero | `src/modules/lavadero/` | `lavadero`, `tipos_lavado` |
+| taller | `src/modules/taller/` | `taller_ordenes`, `taller_items` |
+| pagos | `src/modules/pagos/` | `pagos_servicios` |
+| alertas | `src/modules/alertas/` | `alertas` |
+| auditoria | `src/modules/auditoria/` | `auditoria` |
+| configuracion | `src/modules/configuracion/` | `configuracion_parqueadero`, `reglas_parqueadero` |
+| empresas | `src/modules/empresas/` | `empresas` |
+| usuarios | `src/modules/usuarios/` | `usuarios` |
+| licencias | `src/modules/licencias/` | `licencias`, `modulos`, `licencia_modulo`, `empresa_licencia` |
+| suscripciones | `src/modules/suscripciones/` | `suscripciones_empresa`, `facturas_saas` |
+| reportes (legacy) | `routes/reportes.js` | múltiples tablas |
+| admin/planes (legacy) | `routes/admin/planes-admin.js` | `planes`, `suscripciones`, `empresa_modulos` |
+| admin/empresa-modulos (legacy) | `routes/admin/empresa-modulos.js` | `empresa_modulos` |
 
 ---
 
 ## 4. Esquema de base de datos
 
-### 4.1 Tablas base (`estructura.sql` → `database/001_base_schema.sql`)
+### 4.1 Schema base — `database/001_base_schema.sql`
 
 ```
 empresas ──┬── usuarios
            ├── clientes ── vehiculos
            ├── empleados
-           ├── parqueadero
-           ├── lavadero ──── tipos_lavado
+           ├── parqueadero ── mensualidades_parqueadero
+           ├── lavadero ── tipos_lavado
            ├── taller_ordenes ── taller_items
-           └── tarifas
+           ├── tarifas
+           ├── pagos_servicios
+           ├── arqueos_caja
+           ├── alertas
+           ├── auditoria
+           ├── configuracion_parqueadero
+           ├── reglas_parqueadero
+           ├── licencias ── licencia_modulo ── modulos
+           ├── empresa_licencia
+           ├── suscripciones_empresa ── facturas_saas
+           └── licencia_id (FK → licencias, columna directa)
 ```
 
-### 4.2 Tablas de licenciamiento (`migrations/licencias_migration.sql`)
+Este archivo es **idempotente** (`IF NOT EXISTS` en todo). Es la fuente de verdad para instalaciones nuevas.
+
+### 4.2 Schema SaaS — `database/002_saas_planes.sql`
+
+Extiende el schema con el núcleo SaaS completo:
 
 ```
-licencias ── licencia_modulo ── modulos
-     │
-empresa_licencia ── empresas (también licencia_id columna directa)
+planes ── plan_modulos ── modulos (extendida con activo/orden/icono_clave)
+planes ── suscripciones (1 activa/trial por empresa, restricción por índice parcial)
+empresas ── empresa_modulos ── modulos (overrides y add-ons por empresa)
 ```
 
-### 4.3 Tablas operativas adicionales (migraciones)
+También migra datos existentes de `suscripciones_empresa` → `suscripciones`.
 
-- `arqueos_caja` — cierres de caja por empresa/usuario/fecha.
-- `pagos_servicios` — registro centralizado de pagos de todos los módulos.
+### 4.3 Archivos obsoletos (no ejecutar en instalaciones nuevas)
 
-### 4.4 Tablas SaaS (`migrations/suscripciones_saas_migration.sql`)
-
-```
-suscripciones_empresa ── facturas_saas
-```
-
-### 4.5 Tablas creadas en runtime (sin migration SQL)
-
-| Tabla | Dónde se crea | Propósito |
-|-------|--------------|-----------|
-| `mensualidades_parqueadero` | `routes/parqueadero.js` | Suscripciones mensuales de vehículos |
-| `configuracion_parqueadero` | `utils/parqueadero-config.js` | Config de capacidad y horarios |
-| `reglas_parqueadero` | `utils/parqueadero-config.js` | Tarifas por día de la semana |
-| `alertas` | `routes/alertas.js` | Sistema de notificaciones internas |
-| `auditoria` | `routes/auditoria.js` | Log de acciones de usuarios |
+| Archivo | Estado |
+|---------|--------|
+| `estructura.sql` | Absorbido por `001_base_schema.sql` |
+| `licencias_setup.sql` | Seeds incluidos en `001_base_schema.sql` (Bloque 8) |
+| `migrations/licencias_migration.sql` | Incluido en `001_base_schema.sql` (Bloque 3) |
+| `migrations/arqueos_caja_migration.sql` | Incluido en `001_base_schema.sql` (Bloque 4) |
+| `migrations/pagos_servicios_migration.sql` | Incluido en `001_base_schema.sql` (Bloque 4) |
+| `migrations/suscripciones_saas_migration.sql` | Incluido en `001_base_schema.sql` (Bloque 5) |
 
 ---
 
-## 5. Inconsistencias detectadas
+## 5. Inconsistencias activas
 
-### INC-001 — Tabla fantasma `pagos_parqueadero` ⚠️ CRÍTICA
+### INC-001 — Dos sistemas de suscripciones paralelos (CRÍTICA)
 
-**Descripción:** `routes/pagos.js` referencia la tabla `pagos_parqueadero` en múltiples queries (líneas ~638, ~656, ~729) pero esta tabla **no está definida en ningún archivo SQL ni se crea en código**.
+**Descripción:** Coexisten dos tablas con propósitos solapados:
 
-**Impacto:** El endpoint `GET /api/pagos/parqueadero/:parqueadero_id` y el `PATCH /api/pagos/:id` lanzan errores `relation "pagos_parqueadero" does not exist` en producción si `pagos_servicios` no contiene el registro buscado.
+| Tabla | Quién la gestiona | Quién la lee |
+|-------|-------------------|--------------|
+| `suscripciones_empresa` | `src/modules/suscripciones/` via `utils/suscripciones-schema.js` | `middleware/licencia.js` (cadena legacy) |
+| `suscripciones` | `routes/admin/planes-admin.js` via `services/adminService.js` | `services/licenseService.js` (cadena nueva) |
 
-**Acción recomendada:** Eliminar las ramas de fallback que leen de `pagos_parqueadero` y unificar todo en `pagos_servicios`.
+Una empresa puede tener datos válidos solo en una de las dos tablas. `licenseService` prioriza `suscripciones` (nueva). El módulo `/api/suscripciones` gestiona `suscripciones_empresa` (vieja). Son **sistemas separados que no se sincronizan**.
 
----
-
-### INC-002 — Triple sistema de licencias ⚠️ ALTA
-
-**Descripción:** Coexisten tres mecanismos para determinar si una empresa tiene acceso a un módulo:
-
-1. **Legado** — `empresas.licencia_tipo` (string: `'demo'`, `'basica'`, `'pro'`, `'premium'`).
-2. **Relacional** — tablas `licencias`, `modulos`, `licencia_modulo`, `empresa_licencia`.
-3. **SaaS** — `suscripciones_empresa` + `facturas_saas`.
-
-El middleware `licencia.js` consulta los tres en cascada. Una empresa puede tener datos en los tres sistemas simultáneamente con resultados distintos.
-
-**Acción recomendada:** Consolidar en el sistema relacional (punto 2) como fuente de verdad; deprecar `licencia_tipo` y dejar `suscripciones_empresa` solo para facturación SaaS.
+**Acción recomendada:** Migrar `/api/suscripciones` para operar sobre `suscripciones` + `planes`. Deprecar `suscripciones_empresa` como tabla de control de acceso (puede mantenerse para facturación histórica).
 
 ---
 
-### INC-003 — Columnas duplicadas en `empresas` ⚠️ ALTA
+### INC-002 — `pagos_parqueadero` tabla fantasma (CRÍTICA)
 
-**Descripción:** `licencias_migration.sql` agrega con `ALTER TABLE empresas ADD COLUMN IF NOT EXISTS`:
-- `licencia_id` — nueva referencia FK a `licencias`.
-- `licencia_inicio` — **ya existe** en `estructura.sql`.
-- `licencia_fin` — **ya existe** en `estructura.sql`.
+**Descripción:** `routes/pagos.js` (legacy, aún activo) referencia `pagos_parqueadero` en múltiples queries. La tabla no existe en ningún archivo SQL ni se crea en código.
 
-`IF NOT EXISTS` evita el error, pero la semántica de los campos es ambigua: el campo de `estructura.sql` es para el licenciamiento legado; el de la migración lo intenta usar para el nuevo sistema.
+**Impacto:** `GET /api/pagos/parqueadero/:id` y `PATCH /api/pagos/:id` lanzan `relation "pagos_parqueadero" does not exist` en producción cuando buscan fuera de `pagos_servicios`.
 
-**Acción recomendada:** Documentar que `licencia_inicio`/`licencia_fin` en `empresas` refieren al sistema legado y usar `empresa_licencia.fecha_inicio`/`fecha_fin` para el nuevo sistema.
+**Acción recomendada:** Eliminar ramas de fallback que leen de `pagos_parqueadero` en `src/modules/pagos/pagos.service.js`. Unificar en `pagos_servicios`.
 
 ---
 
-### INC-004 — Doble definición de `arqueos_caja` ⚠️ ALTA
+### INC-003 — Duplicación en `src/utils/` vs `src/lib/` (ALTA)
 
-**Descripción:** La tabla se define en `migrations/arqueos_caja_migration.sql` (con `CREATE TABLE IF NOT EXISTS`) y también se intenta crear en `routes/reportes.js`. Aunque `IF NOT EXISTS` previene el error, la definición en el router es un duplicado riesgoso.
+**Descripción:** Tres archivos en `src/utils/` duplican lógica ya centralizada en `src/lib/`:
 
-**Acción recomendada:** Eliminar el `CREATE TABLE` embebido en `routes/reportes.js` y dejar solo la migración como fuente de verdad.
+- `src/utils/errors.js` → duplica `src/lib/AppError.js` (tiene subclases que `src/lib/` no tiene)
+- `src/utils/transaction.js` → duplica `src/lib/withTransaction.js` (diferente estilo de export)
+- `src/utils/normalizers.js` → solapa con `src/lib/helpers.js`
 
----
+Los módulos refactorizados usan `src/lib/`; nada usa `src/utils/errors.js` ni `src/utils/transaction.js`.
 
-### INC-005 — Doble definición de `tarifas` MEDIA
-
-**Descripción:** `estructura.sql` crea `tarifas`; `utils/parqueadero-config.js` incluye un segundo `CREATE TABLE IF NOT EXISTS tarifas` con definición similar pero no idéntica.
-
-**Acción recomendada:** Eliminar el `CREATE TABLE` de `utils/parqueadero-config.js`.
+**Acción recomendada:** Enriquecer `src/lib/AppError.js` con las subclases de `src/utils/errors.js`. Eliminar `src/utils/errors.js`, `src/utils/transaction.js`, `src/utils/normalizers.js`.
 
 ---
 
-### INC-006 — `/api/pagos` sin verificación de licencia MEDIA
+### INC-004 — Triple sistema de licencias (ALTA)
 
-**Descripción:** En `server.js` línea 60:
-```js
-app.use("/api/pagos", authMiddleware, pagosRoutes);
-// falta: licenseMiddleware("pagos") o similar
-```
-Todos los demás módulos con datos sensibles aplican `licenseMiddleware`.
+**Descripción:** Aún coexisten tres mecanismos para determinar acceso a módulos (ver sección 2.4). `licenseService` los maneja correctamente en cascada, pero el sistema es complejo de mantener y genera datos inconsistentes entre empresas.
 
-**Acción recomendada:** Agregar `licenseMiddleware("pagos")` o decidir explícitamente que pagos es un módulo siempre activo y documentarlo.
+**Estado actual:** el middleware es correcto pero la deuda persiste mientras no se migre todo al sistema de planes.
 
 ---
 
-### INC-007 — `/api/licencias` y `/api/suscripciones` sin `authMiddleware` MEDIA
+### INC-005 — `routes/admin/` sin migrar a `src/modules/` (MEDIA)
 
-**Descripción:** En `server.js` líneas 69-70:
-```js
-app.use("/api/licencias", licenciasRoutes);
-app.use("/api/suscripciones", suscripcionesRoutes);
-```
-No se aplica `authMiddleware`. La protección depende completamente del código interno de cada router.
+**Descripción:** `routes/admin/planes-admin.js` y `routes/admin/empresa-modulos.js` siguen en el patrón legacy (handler todo-en-uno). Toda la lógica de onboarding, creación de tenants y asignación de planes está en `services/adminService.js` sin capa intermedia de controller.
 
-**Acción recomendada:** Aplicar `authMiddleware` a nivel de `server.js` y verificar rol `superadmin` en el middleware, no dentro de cada handler.
+**Acción recomendada:** Migrar a `src/modules/admin/`.
 
 ---
 
-### INC-008 — Tablas dinámicas sin migración SQL MEDIA
+### INC-006 — `routes/reportes.js` sin migrar (MEDIA)
 
-**Descripción:** Cinco tablas se crean via `CREATE TABLE IF NOT EXISTS` dentro de código JS en tiempo de ejecución: `mensualidades_parqueadero`, `configuracion_parqueadero`, `reglas_parqueadero`, `alertas`, `auditoria`. No están en ningún archivo de migración.
+**Descripción:** Es el único módulo operativo que sigue en el patrón legacy. Tiene el `CREATE TABLE IF NOT EXISTS arqueos_caja` embebido (duplicado con `001_base_schema.sql`).
 
-**Impacto:** No hay versioning del esquema, no se pueden aplicar `ALTER TABLE` controlados, dificulta los backups y la replicación.
-
-**Acción recomendada:** Mover sus definiciones a `database/` como migraciones numeradas (002, 003…).
+**Acción recomendada:** Migrar a `src/modules/reportes/`. Eliminar el `CREATE TABLE` embebido.
 
 ---
 
-### INC-009 — Vista `parqueadero_historial` filtra más que otras vistas BAJA
+### INC-007 — `estructura.sql` y `migrations/` en raíz (BAJA)
 
-`parqueadero_historial` solo devuelve registros con `hora_salida IS NOT NULL`, mientras que `lavados` y `ordenes_taller` devuelven todo. Inconsistencia conceptual. El código no usa estas vistas (consulta las tablas directamente).
+**Descripción:** Archivos históricos que confunden a nuevos desarrolladores sobre cuál es el camino correcto de inicialización.
 
----
-
-### INC-010 — `parqueadero.cantidad_fotos` sin uso BAJA
-
-Columna declarada en `estructura.sql` (`INTEGER`), no se popula en ninguna ruta ni hay lógica de conteo de fotos en el sistema. Deuda técnica.
+**Acción recomendada:** Mover a `database/legacy/` o eliminar del repositorio (conservar solo en git history).
 
 ---
 
-## 6. Flujo de autenticación
+### INC-008 — `.env` en el repositorio (CRÍTICA — preexistente)
+
+**Descripción:** El archivo `.env` con credenciales reales fue commiteado en algún momento. Aunque `.gitignore` lo excluya ahora, las credenciales pueden estar en el historial de git.
+
+**Acción recomendada:** Rotar todas las credenciales (DB_PASSWORD, JWT_SECRET, SMTP_PASS). Ejecutar `git filter-repo` o `BFG Repo-Cleaner` para limpiar el historial si el repo es público o semipúblico.
+
+---
+
+## 6. Orden correcto de trabajo para la próxima fase
+
+### Prioridad 1 — Eliminar errores en producción (esta semana)
+
+1. **INC-002:** Limpiar referencias a `pagos_parqueadero` en `src/modules/pagos/pagos.service.js`
+2. **INC-008:** Rotar credenciales expuestas
+
+### Prioridad 2 — Consolidar infraestructura (próxima semana)
+
+3. **INC-003:** Enriquecer `src/lib/AppError.js` con subclases. Borrar `src/utils/errors.js`, `src/utils/transaction.js`, `src/utils/normalizers.js`
+4. **INC-006:** Migrar `routes/reportes.js` a `src/modules/reportes/`
+5. Mover archivos obsoletos a `database/legacy/`
+
+### Prioridad 3 — Definir fuente de verdad SaaS (siguiente sprint)
+
+6. **INC-001:** Migrar `/api/suscripciones` para operar sobre tabla `suscripciones` + `planes`
+7. **INC-005:** Migrar `routes/admin/` a `src/modules/admin/`
+8. Deprecar `suscripciones_empresa` como tabla de control de acceso
+
+### Prioridad 4 — Hardening antes de clientes reales
+
+9. Rate limiting en `/api/login` y `/api/register` (`express-rate-limit`)
+10. Headers de seguridad (`helmet`)
+11. Validación de inputs con `zod` (ya en `package.json`, no se usa)
+12. CORS restrictivo por whitelist en `NODE_ENV=production`
+13. Audit de autorización: verificar `empresa_id === req.user.empresa_id` en todos los handlers
+
+---
+
+## 7. Flujo de autenticación
 
 ```
 POST /api/login
-  → valida email/password contra usuarios
-  → genera JWT { id, empresa_id, rol }
-  → retorna token
+  → valida email/password contra usuarios WHERE empresa_id = empresa_activa
+  → genera JWT { id, empresa_id, rol, nombre }
+  → retorna { token, usuario }
 
 Solicitudes posteriores:
-  → Header: Authorization: Bearer <token>
-  → authMiddleware verifica firma JWT
-  → licenseMiddleware consulta módulos disponibles
-  → handler de negocio
+  → Authorization: Bearer <token>
+  → authMiddleware: verifica firma, inyecta req.user
+  → licenseMiddleware: getLicenseStatus → verifica módulo
+  → controller/service
 ```
 
 ---
 
-## 7. Roles de usuario
+## 8. Decisiones técnicas pendientes
 
-| Rol | Acceso |
-|-----|--------|
-| `admin` | Empresa completa |
-| `operador` | Módulos asignados |
-| `superadmin` | Gestión de todas las empresas y licencias |
-
----
-
-## 8. Archivos de configuración clave
-
-| Archivo | Propósito |
-|---------|-----------|
-| `.env` | Variables de entorno (no commitear) |
-| `.env.example` | Plantilla pública de variables |
-| `db.js` | Pool pg — usa `DB_*` vars |
-| `server.js` | Registro de rutas y middlewares |
-| `database/001_base_schema.sql` | Esquema base consolidado |
-| `migrations/` | Migraciones incrementales numeradas |
+| Decisión | Opciones | Impacto |
+|----------|----------|---------|
+| Sistema de licencias definitivo | Consolidar en `suscripciones+planes` vs mantener tres niveles | Alto |
+| Herramienta de migrations | `node-pg-migrate`, Flyway, manual | Medio |
+| Aislamiento de tenants | Row-level security PG vs application-level actual | Alto |
+| Pasarela de pago | Wompi (Colombia) vs Stripe (internacional) | Alto |
+| Logging estructurado | `pino` vs `winston` vs `console` actual | Bajo |
+| Workers asincrónos | Bull/BullMQ para emails y reportes pesados | Medio |
