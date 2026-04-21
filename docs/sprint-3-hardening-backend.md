@@ -16,7 +16,9 @@ Después del Sprint 2, AutoGestion360 ya tenía una resolución central de licen
    - creación de vehículos con `cliente_id` externo
    - creación de órdenes de lavadero con `cliente_id`, `vehiculo_id`, `lavador_id` o `tipo_lavado_id` de otra empresa
    - creación de órdenes de taller con `cliente_id`, `vehiculo_id` o `mecanico_id` de otra empresa
-6. `.env` sigue rastreado por git en este repositorio. Eso implica riesgo operativo y requiere rotación/limpieza fuera de este sprint.
+6. `.env` estaba rastreado por git en este repositorio. Eso implicaba riesgo operativo y requería limpieza controlada.
+7. La ruta legacy activa `routes/reportes.js` seguía creando la tabla `arqueos_caja` en runtime.
+8. `setup-demo` usaba una contraseña fija hardcodeada en código.
 
 ## Decisiones tomadas
 
@@ -34,6 +36,8 @@ Después del Sprint 2, AutoGestion360 ya tenía una resolución central de licen
    - usuarios
    - empresas
 5. Corregir referencias cruzables por `empresa_id` en servicios operativos críticos sin tocar el núcleo SaaS.
+6. Endurecer la última ruta legacy montada desde `routes/` y mover su DDL a migración SQL.
+7. Mantener `setup-demo` compatible, pero permitir parametrizar su credencial por entorno.
 
 ## Medidas implementadas
 
@@ -77,6 +81,7 @@ Endpoints protegidos:
 - `POST /api/usuarios`
 - `PATCH /api/usuarios/:id/password`
 - `POST /api/empresas`
+- `POST /api/reportes/caja/arqueos`
 
 No existe hoy un endpoint activo de recuperación de contraseña en el módulo refactorizado, así que no se aplicó limiter ahí. Queda pendiente cuando ese flujo exista formalmente.
 
@@ -107,6 +112,8 @@ Payloads cubiertos:
 - creación de facturas SaaS
 - creación, edición, cambio de estado y cambio de password de usuarios
 - creación, edición y cambio de estado de empresas
+- consultas legacy de reportes con rango de fechas validado
+- creación de arqueos de caja legacy
 
 Los errores de validación ahora devuelven `400` con `details` estructurado cuando aplica.
 
@@ -144,11 +151,12 @@ Correcciones aplicadas:
 - asociación cruzada de FKs entre tenants en vehículos, lavadero y taller
 - operaciones admin sobre empresa inexistente con errores poco claros
 - overrides de módulos sobre empresas/módulos inexistentes
+- `reportes` legacy ya no depende de DDL en runtime para `arqueos_caja`
 
 ### Riesgos aún pendientes
 
-- todavía existen rutas legacy fuera de `src/modules/` que merecen una auditoría más profunda de scoping
-- no se hizo un barrido exhaustivo de cada query en `routes/*.js` legacy
+- todavía existen archivos legacy fuera de `src/modules/`, pero la única ruta legacy montada en `src/app.js` al cierre de este sprint es `routes/reportes.js`
+- no se hizo un barrido exhaustivo de cada query en rutas legacy no montadas
 - no se introdujo una capa global de autorización por recurso; el sistema sigue apoyándose en filtros por `empresa_id` dentro de servicios/rutas
 
 ## Variables de entorno nuevas o relevantes
@@ -168,24 +176,27 @@ Correcciones aplicadas:
 - `RATE_LIMIT_ADMIN_WINDOW_MS`
 - `RATE_LIMIT_ADMIN_MAX`
 - `ALLOW_LEGACY_LICENSE_FALLBACK`
+- `SETUP_DEMO_PASSWORD`
 
 ## Secretos y configuración
 
 Hallazgos:
 
-- `.env` sigue rastreado por git
-- `.gitignore` ya lo ignora, pero eso no elimina el tracking histórico
+- `.env` estaba rastreado por git
+- `.gitignore` ya lo ignoraba, pero eso no elimina el tracking histórico por sí solo
+- `setup-demo` tenía una password fija embebida en código
 
 Decisión tomada en este sprint:
 
 - se actualizó `.env.example`
-- no se removió `.env` del índice automáticamente para evitar un cambio potencialmente disruptivo sin coordinación
+- `.env` se removió del índice git sin borrar el archivo local
+- `setup-demo` ahora permite `SETUP_DEMO_PASSWORD`, con fallback conservador para no romper compatibilidad
 
 Pendiente recomendado:
 
 1. rotar secretos reales si ese `.env` contiene valores válidos
-2. ejecutar `git rm --cached .env`
-3. confirmar que ningún secreto siga presente en historial o dumps compartidos
+2. confirmar que ningún secreto siga presente en historial o dumps compartidos
+3. definir una política para deshabilitar `setup-demo` fuera de entornos de desarrollo
 
 ## Checklist de validación manual
 
@@ -216,6 +227,7 @@ Pendiente recomendado:
 - [ ] `PUT /api/admin/planes/:id` actualiza un plan válido
 - [ ] `POST /api/admin/onboarding` sigue creando tenant correctamente
 - [ ] `PUT /api/admin/empresa-modulos/:empresaId/:moduloId` guarda override correctamente
+- [ ] `POST /api/reportes/caja/arqueos` sigue guardando un arqueo válido tras aplicar `database/004_arqueos_caja.sql`
 
 ### Scoping multiempresa
 
@@ -226,7 +238,7 @@ Pendiente recomendado:
 
 ## Pendientes
 
-- revisar y endurecer las rutas legacy que siguen en `routes/*.js`
+- migrar o retirar definitivamente `routes/reportes.js` hacia `src/modules/reportes`
 - introducir recuperación de contraseña formal con validación y rate limit propio
 - considerar CSP real cuando el frontend deje de depender de configuraciones permisivas
-- decidir un plan formal para desindexar `.env` y rotar secretos
+- completar rotación de secretos y limpieza histórica si `.env` tuvo valores reales

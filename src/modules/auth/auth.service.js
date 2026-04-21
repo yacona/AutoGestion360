@@ -182,7 +182,7 @@ async function setupDemo() {
     licencia_tipo: 'demo',
   });
 
-  const passwordPlano = '123456';
+  const passwordPlano = String(process.env.SETUP_DEMO_PASSWORD || '123456');
   const hash = await bcrypt.hash(passwordPlano, 10);
   const usuario = await repo.createUsuario(empresa.id, {
     nombre: 'SuperAdmin Demo',

@@ -4,6 +4,14 @@ const router = express.Router();
 const db = require("../db");
 const auth = require("../middleware/auth");
 const { ensurePagosServiciosSchema } = require("../utils/pagos-servicios-schema");
+const validate = require("../src/middlewares/validate");
+const { adminMutationLimiter } = require("../src/lib/security/rate-limit");
+const {
+  arqueoIdParamSchema,
+  arqueosListQuerySchema,
+  crearArqueoBodySchema,
+  rangoFechasQuerySchema,
+} = require("../src/lib/validation/reportes.schemas");
 
 // Todas las rutas de reportes requieren autenticación
 router.use(auth);
@@ -209,37 +217,22 @@ function safeLimit(value, fallback = 20, max = 100) {
   return Math.min(parsed, max);
 }
 
-async function ensureArqueosCajaSchema() {
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS arqueos_caja (
-      id BIGSERIAL PRIMARY KEY,
-      empresa_id BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-      usuario_id BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
-      fecha_caja DATE NOT NULL,
-      desde TIMESTAMPTZ NOT NULL,
-      hasta TIMESTAMPTZ NOT NULL,
-      total_facturado NUMERIC(14,2) DEFAULT 0,
-      total_recaudado NUMERIC(14,2) DEFAULT 0,
-      total_pendiente NUMERIC(14,2) DEFAULT 0,
-      efectivo_sistema NUMERIC(14,2) DEFAULT 0,
-      efectivo_contado NUMERIC(14,2) DEFAULT 0,
-      diferencia NUMERIC(14,2) DEFAULT 0,
-      servicios_total INTEGER DEFAULT 0,
-      servicios_pagados INTEGER DEFAULT 0,
-      servicios_pendientes INTEGER DEFAULT 0,
-      metodos_pago JSONB DEFAULT '[]'::jsonb,
-      modulos JSONB DEFAULT '[]'::jsonb,
-      responsables JSONB DEFAULT '[]'::jsonb,
-      observaciones TEXT,
-      estado VARCHAR(30) DEFAULT 'CERRADO',
-      creado_en TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
+let arqueosSchemaChecked = false;
 
-  await db.query(`
-    CREATE INDEX IF NOT EXISTS arqueos_caja_empresa_fecha_idx
-    ON arqueos_caja (empresa_id, fecha_caja DESC, creado_en DESC)
-  `);
+async function ensureArqueosCajaSchema() {
+  if (arqueosSchemaChecked) return;
+
+  const { rows } = await db.query(
+    `SELECT to_regclass('public.arqueos_caja') AS table_name`
+  );
+
+  if (!rows[0]?.table_name) {
+    throw new Error(
+      "La tabla arqueos_caja no existe. Aplique la migracion database/004_arqueos_caja.sql antes de usar este endpoint."
+    );
+  }
+
+  arqueosSchemaChecked = true;
 }
 
 async function obtenerCajaParaArqueo(empresa_id, desdeISO, hastaISO) {
@@ -335,7 +328,7 @@ async function obtenerCajaParaArqueo(empresa_id, desdeISO, hastaISO) {
  *   total_general: number
  * }
  */
-router.get("/resumen", async (req, res) => {
+router.get("/resumen", validate({ query: rangoFechasQuerySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { desdeISO, hastaISO } = obtenerRangoFechas(req.query);
 
@@ -422,7 +415,7 @@ router.get("/resumen", async (req, res) => {
  *   ...
  * ]
  */
-router.get("/diario", async (req, res) => {
+router.get("/diario", validate({ query: rangoFechasQuerySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { desdeISO, hastaISO } = obtenerRangoFechas(req.query);
 
@@ -534,7 +527,7 @@ router.get("/diario", async (req, res) => {
  * Consolida movimientos cerrados de parqueadero, lavadero y taller para
  * revisar recaudo, cartera pendiente, métodos de pago y responsables.
  */
-router.get("/caja", async (req, res) => {
+router.get("/caja", validate({ query: rangoFechasQuerySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { desdeISO, hastaISO } = obtenerRangoFechas(req.query);
 
@@ -687,7 +680,7 @@ router.get("/caja", async (req, res) => {
 });
 
 // GET /api/reportes/caja/arqueos
-router.get("/caja/arqueos", async (req, res) => {
+router.get("/caja/arqueos", validate({ query: arqueosListQuerySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const limit = safeLimit(req.query.limit);
 
@@ -713,7 +706,7 @@ router.get("/caja/arqueos", async (req, res) => {
 });
 
 // GET /api/reportes/caja/arqueos/:id
-router.get("/caja/arqueos/:id", async (req, res) => {
+router.get("/caja/arqueos/:id", validate({ params: arqueoIdParamSchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { id } = req.params;
 
@@ -742,7 +735,7 @@ router.get("/caja/arqueos/:id", async (req, res) => {
 });
 
 // GET /api/reportes/caja/arqueos/:id/comprobante
-router.get("/caja/arqueos/:id/comprobante", async (req, res) => {
+router.get("/caja/arqueos/:id/comprobante", validate({ params: arqueoIdParamSchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { id } = req.params;
 
@@ -832,14 +825,10 @@ router.get("/caja/arqueos/:id/comprobante", async (req, res) => {
 });
 
 // POST /api/reportes/caja/arqueos
-router.post("/caja/arqueos", async (req, res) => {
+router.post("/caja/arqueos", adminMutationLimiter, validate({ body: crearArqueoBodySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const usuario_id = req.user.id;
   const { desde, hasta, fecha_caja, efectivo_contado, observaciones } = req.body || {};
-
-  if (!desde || !hasta) {
-    return res.status(400).json({ error: "desde y hasta son obligatorios." });
-  }
 
   const efectivoContado = toNumber(efectivo_contado);
   const { desdeISO, hastaISO } = obtenerRangoFechas({ desde, hasta });
@@ -902,7 +891,7 @@ router.post("/caja/arqueos", async (req, res) => {
  * Query: ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD (opcional)
  * Reporte de clientes más activos
  */
-router.get("/clientes", async (req, res) => {
+router.get("/clientes", validate({ query: rangoFechasQuerySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { desdeISO, hastaISO } = obtenerRangoFechas(req.query);
 
@@ -952,7 +941,7 @@ router.get("/clientes", async (req, res) => {
  * Query: ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD (opcional)
  * Reporte de rendimiento de empleados
  */
-router.get("/empleados", async (req, res) => {
+router.get("/empleados", validate({ query: rangoFechasQuerySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { desdeISO, hastaISO } = obtenerRangoFechas(req.query);
 
@@ -994,7 +983,7 @@ router.get("/empleados", async (req, res) => {
  * Query: ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD (opcional)
  * Reporte de vehículos más atendidos
  */
-router.get("/vehiculos", async (req, res) => {
+router.get("/vehiculos", validate({ query: rangoFechasQuerySchema }), async (req, res) => {
   const empresa_id = req.user.empresa_id;
   const { desdeISO, hastaISO } = obtenerRangoFechas(req.query);
 
