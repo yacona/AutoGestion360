@@ -64,7 +64,7 @@ async function cargarOrdensTaller() {
           <td>${formatMoney(ord.total_general)}</td>
           <td>${renderBadge(ord.estado)}</td>
           <td>
-            <button class="btn btn-sm btn-primary" onclick="completarOrdenTaller(${ord.id})">Entregar y cobrar</button>
+            <button type="button" class="btn btn-sm btn-primary" data-taller-action="entregar" data-orden-id="${ord.id}">Entregar y cobrar</button>
           </td>
         </tr>
       `).join("");
@@ -105,3 +105,31 @@ async function completarOrdenTaller(id) {
     showMessage("tal-msg", err.message, true);
   }
 }
+
+let tallerEventsBound = false;
+
+function bindTallerEvents() {
+  if (tallerEventsBound) return;
+  tallerEventsBound = true;
+
+  document.getElementById("form-taller-nueva")?.addEventListener("submit", handleNuevaOrdenTaller);
+  document.getElementById("tal-historial-buscar")?.addEventListener("input", () => cargarOrdensTaller());
+  document.getElementById("tal-activos-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-taller-action='entregar']");
+    if (!button) return;
+    completarOrdenTaller(button.dataset.ordenId);
+  });
+}
+
+window.AG360.registerModule({
+  id: "taller",
+  title: "Taller",
+  licenseModule: "taller",
+  icon: "🔧",
+  order: 60,
+  bindEvents: bindTallerEvents,
+  onEnter: async () => {
+    await loadTallerMecanicos();
+    await cargarOrdensTaller();
+  },
+});

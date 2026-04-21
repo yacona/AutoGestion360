@@ -48,6 +48,185 @@ function moduloEstadoBadge(estado) {
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
+function getLicenciaById(id) {
+  return licenciasCatalogoData.find((licencia) => Number(licencia.id) === Number(id));
+}
+
+function getLicenciaForEmpresa(empresa = {}) {
+  if (empresa.licencia_id) return getLicenciaById(empresa.licencia_id);
+  const licenciaTipo = normalizeRole(empresa.licencia_nombre || empresa.licencia_tipo);
+  return licenciasCatalogoData.find((licencia) => normalizeRole(licencia.nombre) === licenciaTipo);
+}
+
+function getSuscripcionForEmpresa(empresa = {}) {
+  return suscripcionesAdminData.find((suscripcion) => Number(suscripcion.empresa_id) === Number(empresa.id));
+}
+
+function populateLicenciaPlanSelect() {
+  const select = document.getElementById("licencia-plan-id");
+  if (!select) return;
+  select.innerHTML = licenciasCatalogoData.map((licencia) =>
+    `<option value="${licencia.id}">${licencia.nombre} - ${fmtMoney(licencia.precio || 0)}</option>`
+  ).join("");
+}
+
+function populateLicenciaEmpresaSelect() {
+  const select = document.getElementById("licencia-empresa-id");
+  if (!select) return;
+  select.innerHTML = empresasAdminData.map((empresa) =>
+    `<option value="${empresa.id}">${empresa.nombre}</option>`
+  ).join("");
+}
+
+function populateSuscripcionEmpresaSelect() {
+  const select = document.getElementById("suscripcion-empresa-id");
+  if (!select) return;
+  select.innerHTML = empresasAdminData.map((empresa) =>
+    `<option value="${empresa.id}">${empresa.nombre}</option>`
+  ).join("");
+}
+
+function populateSuscripcionPlanSelect() {
+  const select = document.getElementById("suscripcion-plan-id");
+  if (!select) return;
+  select.innerHTML = licenciasCatalogoData.map((licencia) =>
+    `<option value="${licencia.id}">${licencia.nombre} - ${fmtMoney(licencia.precio || 0)}</option>`
+  ).join("");
+}
+
+function renderLicenciaPlanModulos() {
+  const panel = document.getElementById("licencia-plan-modulos");
+  if (!panel) return;
+
+  const licencia = getLicenciaById(document.getElementById("licencia-plan-id")?.value);
+  const modulos = licencia?.modulos || [];
+
+  if (modulos.length === 0) {
+    panel.innerHTML = '<span class="badge badge-muted">Sin módulos asignados</span>';
+    return;
+  }
+
+  panel.innerHTML = modulos.map((modulo) => `<span class="badge badge-teal">${modulo.nombre}</span>`).join("");
+}
+
+function renderFacturasSaasTable() {
+  const tbody = document.getElementById("facturas-saas-tbody");
+  const empty = document.getElementById("facturas-saas-empty");
+  if (!tbody || !empty) return;
+
+  tbody.innerHTML = "";
+  if (!facturasSaasData.length) {
+    empty.hidden = false;
+    return;
+  }
+
+  empty.hidden = true;
+  tbody.innerHTML = facturasSaasData.map((factura) => `
+    <tr>
+      <td>
+        <strong>${factura.numero_factura || "-"}</strong>
+        <span class="table-subtext">${formatDisplayDate(factura.fecha_emision)}</span>
+      </td>
+      <td>${factura.concepto || "-"}</td>
+      <td>${formatDisplayDate(factura.periodo_inicio)} - ${formatDisplayDate(factura.periodo_fin)}</td>
+      <td>${formatMoney(Number(factura.total || 0))}</td>
+      <td>${renderBadge(factura.estado || "PENDIENTE")}</td>
+      <td>${factura.metodo_pago || factura.referencia_pago || "-"}</td>
+    </tr>
+  `).join("");
+}
+
+async function cargarFacturasSaas(empresaId) {
+  const empresaIdNum = Number(empresaId || 0);
+  facturasSaasData = [];
+  renderFacturasSaasTable();
+
+  if (!empresaIdNum) return;
+
+  try {
+    facturasSaasData = await apiFetch(`/api/suscripciones/${empresaIdNum}/facturas`);
+    renderFacturasSaasTable();
+  } catch (error) {
+    facturasSaasData = [];
+    renderFacturasSaasTable();
+    if (typeof showMessage === "function") showMessage("factura-saas-msg", error.message, true);
+  }
+}
+
+async function syncSuscripcionSaasForm(empresaId = null) {
+  const selectEmpresa = document.getElementById("suscripcion-empresa-id");
+  const selectPlan = document.getElementById("suscripcion-plan-id");
+  if (!selectEmpresa || !selectPlan) return;
+
+  if (empresaId) {
+    selectEmpresa.value = String(empresaId);
+  }
+
+  const empresa = empresasAdminData.find((item) => Number(item.id) === Number(selectEmpresa.value));
+  const suscripcion = getSuscripcionForEmpresa(empresa || {});
+  const licencia = suscripcion?.licencia_id
+    ? getLicenciaById(suscripcion.licencia_id)
+    : getLicenciaForEmpresa(empresa || {});
+
+  if (licencia) {
+    selectPlan.value = String(licencia.id);
+  }
+
+  document.getElementById("suscripcion-estado").value = suscripcion?.estado_real || (licencia?.nombre === "Demo" ? "TRIAL" : "ACTIVA");
+  document.getElementById("suscripcion-pasarela").value = suscripcion?.pasarela || "MANUAL";
+  document.getElementById("suscripcion-fecha-inicio").value = fmtInput(
+    suscripcion?.fecha_inicio || empresa?.licencia_asignacion_inicio || empresa?.licencia_inicio || new Date()
+  );
+  document.getElementById("suscripcion-fecha-fin").value = fmtInput(
+    suscripcion?.fecha_fin || empresa?.licencia_asignacion_fin || empresa?.licencia_fin
+  );
+  document.getElementById("suscripcion-precio-plan").value = String(
+    Math.round(Number(suscripcion?.precio_plan ?? licencia?.precio ?? 0))
+  );
+  document.getElementById("suscripcion-referencia-externa").value = suscripcion?.referencia_externa || "";
+  document.getElementById("suscripcion-renovacion-automatica").checked = Boolean(suscripcion?.renovacion_automatica);
+  document.getElementById("suscripcion-observaciones").value = suscripcion?.observaciones || "";
+
+  setElementText("suscripcion-estado-actual", empresa ? `${empresa.nombre} · ${suscripcion?.estado_real || "SIN SUSCRIPCION"}` : "Sin suscripción");
+  setElementText("facturas-saas-empresa-actual", empresa ? `${empresa.nombre}${suscripcion?.licencia_nombre ? ` · ${suscripcion.licencia_nombre}` : ""}` : "Sin empresa");
+
+  document.getElementById("factura-saas-total").value = String(
+    Math.round(Number(suscripcion?.precio_plan ?? licencia?.precio ?? 0))
+  );
+  document.getElementById("factura-saas-periodo-inicio").value = fmtInput(suscripcion?.fecha_inicio || new Date());
+  document.getElementById("factura-saas-periodo-fin").value = fmtInput(suscripcion?.fecha_fin);
+
+  await cargarFacturasSaas(empresa?.id);
+}
+
+function syncLicenciaEmpresaForm(empresaId = null) {
+  const selectEmpresa = document.getElementById("licencia-empresa-id");
+  const selectPlan = document.getElementById("licencia-plan-id");
+  if (!selectEmpresa || !selectPlan) return;
+
+  if (empresaId) selectEmpresa.value = String(empresaId);
+
+  const empresa = empresasAdminData.find((item) => Number(item.id) === Number(selectEmpresa.value));
+  const licencia = getLicenciaForEmpresa(empresa || {});
+  if (licencia) selectPlan.value = String(licencia.id);
+
+  document.getElementById("licencia-fecha-inicio").value = fmtInput(
+    empresa?.licencia_asignacion_inicio || empresa?.licencia_inicio || new Date()
+  );
+  document.getElementById("licencia-fecha-fin").value = fmtInput(
+    empresa?.licencia_asignacion_fin || empresa?.licencia_fin
+  );
+
+  const current = document.getElementById("licencia-empresa-estado");
+  if (current) {
+    const nombre = licencia?.nombre || empresa?.licencia_nombre || empresa?.licencia_tipo || "Sin licencia";
+    const fin = empresa?.licencia_asignacion_fin || empresa?.licencia_fin;
+    current.textContent = `${nombre}${fin ? ` hasta ${new Date(fin).toLocaleDateString()}` : " sin vencimiento"}`;
+  }
+
+  renderLicenciaPlanModulos();
+}
+
 // ─── KPIs ─────────────────────────────────────────────────────
 
 function renderEmpresasSummary(empresas = []) {
@@ -88,10 +267,9 @@ function renderEmpresasTable() {
   if (!lista.length) return;
 
   tbody.innerHTML = lista.map(e => {
-    const nextActiva = !e.activa;
     const btnToggle  = e.activa
-      ? `<button class="btn btn-sm btn-danger"  onclick="toggleEmpresaAdmin(${e.id},false)">Suspender</button>`
-      : `<button class="btn btn-sm btn-success" onclick="toggleEmpresaAdmin(${e.id},true)">Activar</button>`;
+      ? `<button type="button" class="btn btn-sm btn-danger" data-empresa-action="toggle" data-empresa-id="${e.id}" data-empresa-activa="false">Suspender</button>`
+      : `<button type="button" class="btn btn-sm btn-success" data-empresa-action="toggle" data-empresa-id="${e.id}" data-empresa-activa="true">Activar</button>`;
     return `
       <tr>
         <td>
@@ -110,9 +288,9 @@ function renderEmpresasTable() {
         <td>${estadoBadge(e.activa ? 'Activa' : 'Inactiva')}</td>
         <td>
           <div class="table-actions">
-            <button class="btn btn-sm btn-secondary" onclick="editarEmpresaAdmin(${e.id})">Editar</button>
-            <button class="btn btn-sm btn-secondary" onclick="abrirPanelPlan(${e.id})">Plan</button>
-            <button class="btn btn-sm btn-secondary" onclick="abrirPanelModulos(${e.id})">Módulos</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-empresa-action="editar" data-empresa-id="${e.id}">Editar</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-empresa-action="plan" data-empresa-id="${e.id}">Plan</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-empresa-action="modulos" data-empresa-id="${e.id}">Módulos</button>
             ${btnToggle}
           </div>
         </td>
@@ -145,7 +323,7 @@ function renderProximasAVencer() {
         <td>${fmtDate(s.trial_hasta || s.fecha_fin)}</td>
         <td><span class="badge ${urgencia}">${dias} día${dias !== 1 ? 's' : ''}</span></td>
         <td>
-          <button class="btn btn-sm btn-primary" onclick="abrirPanelPlan(${s.empresa_id})">Renovar</button>
+          <button type="button" class="btn btn-sm btn-primary" data-empresa-action="plan" data-empresa-id="${s.empresa_id}">Renovar</button>
         </td>
       </tr>`;
   }).join('');
@@ -200,20 +378,25 @@ function renderModulosEmpresa() {
     // Toggle: si está en plan → ofrecer desactivar; si no está → ofrecer add-on
     let accion = '';
     if (enPlan && (!override || activo)) {
-      accion = `<button class="btn btn-sm btn-warning"
-                  onclick="guardarOverrideModulo(${m.id}, false)"
+      accion = `<button type="button" class="btn btn-sm btn-warning"
+                  data-modulos-action="override"
+                  data-modulo-id="${m.id}"
+                  data-modulo-activo="false"
                   title="Desactivar para esta empresa aunque esté en el plan">
                   Desactivar
                 </button>`;
     } else if (!enPlan && (!override || !activo)) {
-      accion = `<button class="btn btn-sm btn-primary"
-                  onclick="guardarOverrideModulo(${m.id}, true)"
+      accion = `<button type="button" class="btn btn-sm btn-primary"
+                  data-modulos-action="override"
+                  data-modulo-id="${m.id}"
+                  data-modulo-activo="true"
                   title="Añadir como add-on fuera del plan">
                   Add-on
                 </button>`;
     } else {
-      accion = `<button class="btn btn-sm btn-secondary"
-                  onclick="eliminarOverrideModulo(${m.id})"
+      accion = `<button type="button" class="btn btn-sm btn-secondary"
+                  data-modulos-action="reset"
+                  data-modulo-id="${m.id}"
                   title="Volver al comportamiento del plan">
                   Restablecer
                 </button>`;
@@ -488,34 +671,48 @@ function populatePlanesSelect(targetId) {
 
 async function cargarEmpresas() {
   try {
-    const [empresas, planes, resumen, proximas] = await Promise.all([
+    const [empresas, planes, resumen, proximas, licenciasData, suscripciones] = await Promise.all([
       apiFetch('/api/admin/empresas'),
       apiFetch('/api/admin/planes'),
       apiFetch('/api/admin/resumen').catch(() => null),
       apiFetch('/api/admin/proximas-vencer?dias=30').catch(() => []),
+      apiFetch('/api/licencias/catalogo/completo').catch(() => ({ licencias: [] })),
+      apiFetch('/api/suscripciones').catch(() => []),
     ]);
 
     empresasAdminData    = empresas  || [];
     planesAdminData      = planes    || [];
     saasResumenData      = resumen;
     proximasAVencerData  = proximas  || [];
+    licenciasCatalogoData = licenciasData?.licencias || [];
+    suscripcionesAdminData = Array.isArray(suscripciones) ? suscripciones : [];
 
     // Poblar selects de planes
     populatePlanesSelect('empresa-admin-plan');
     populatePlanesSelect('plan-select-plan-id');
+    populateLicenciaPlanSelect();
+    populateLicenciaEmpresaSelect();
+    populateSuscripcionEmpresaSelect();
+    populateSuscripcionPlanSelect();
 
     renderEmpresasSummary(empresasAdminData);
     renderSaasSummary(saasResumenData);
     renderEmpresasTable();
     renderProximasAVencer();
+    renderLicenciaPlanModulos();
+    syncLicenciaEmpresaForm();
+    await syncSuscripcionSaasForm();
   } catch (err) {
     empresasAdminData   = [];
     planesAdminData     = [];
     proximasAVencerData = [];
+    licenciasCatalogoData = [];
+    suscripcionesAdminData = [];
     renderEmpresasSummary([]);
     renderSaasSummary(null);
     renderEmpresasTable();
     renderProximasAVencer();
+    renderFacturasSaasTable();
     if (typeof showMessage === 'function') showMessage('empresa-admin-msg', err.message, true);
   }
 }
@@ -523,14 +720,6 @@ async function cargarEmpresas() {
 // ─── LEGACY: Retrocompat formularios de licencia/suscripción ──
 // Estos bloques mantienen funcionando los formularios heredados del HTML
 // hasta que se migren a los nuevos paneles.
-
-async function cargarLicenciasCatalogo() {
-  if (typeof userIsSuperAdmin !== 'function' || !userIsSuperAdmin()) return;
-  try {
-    const data = await apiFetch('/api/licencias/catalogo/completo');
-    licenciasCatalogoData = data.licencias || [];
-  } catch (_) { licenciasCatalogoData = []; }
-}
 
 function renderEmpresasSummaryLegacy(empresas = []) { renderEmpresasSummary(empresas); }
 
@@ -609,3 +798,143 @@ async function handleCambiarEstadoSuscripcionSaas(estado) {
     if (typeof showMessage === 'function') showMessage('suscripcion-saas-msg', err.message, true);
   }
 }
+
+async function handleRenovarSuscripcionSaas() {
+  const empresaId = Number(document.getElementById("suscripcion-empresa-id")?.value || 0);
+  if (!empresaId) {
+    if (typeof showMessage === "function") showMessage("suscripcion-saas-msg", "Selecciona una empresa para renovar.", true);
+    return;
+  }
+
+  try {
+    await apiFetch(`/api/suscripciones/${empresaId}/renovar`, {
+      method: "POST",
+      body: JSON.stringify({
+        dias: 30,
+        licencia_id: Number(document.getElementById("suscripcion-plan-id")?.value || 0),
+        pasarela: document.getElementById("suscripcion-pasarela")?.value || "MANUAL",
+        total: Number(document.getElementById("suscripcion-precio-plan")?.value || 0),
+        metodo_pago: document.getElementById("factura-saas-metodo")?.value.trim() || null,
+        referencia_pago: document.getElementById("factura-saas-referencia")?.value.trim() || null,
+      }),
+    });
+
+    if (typeof showMessage === "function") showMessage("suscripcion-saas-msg", "Suscripción renovada por 30 días.");
+    await cargarEmpresas();
+    await syncSuscripcionSaasForm(empresaId);
+  } catch (err) {
+    if (typeof showMessage === "function") showMessage("suscripcion-saas-msg", err.message, true);
+  }
+}
+
+async function handleRegistrarFacturaSaas(event) {
+  event.preventDefault();
+
+  const empresaId = Number(document.getElementById("suscripcion-empresa-id")?.value || 0);
+  if (!empresaId) {
+    if (typeof showMessage === "function") showMessage("factura-saas-msg", "Selecciona una empresa.", true);
+    return;
+  }
+
+  const total = Number(document.getElementById("factura-saas-total")?.value || 0);
+  if (!Number.isFinite(total) || total <= 0) {
+    if (typeof showMessage === "function") {
+      showMessage("factura-saas-msg", "El total de la factura debe ser mayor a cero.", true);
+    }
+    return;
+  }
+
+  const impuestos = Number(document.getElementById("factura-saas-impuestos")?.value || 0);
+  const subtotal = Math.max(total - impuestos, 0);
+
+  try {
+    await apiFetch(`/api/suscripciones/${empresaId}/facturas`, {
+      method: "POST",
+      body: JSON.stringify({
+        concepto: document.getElementById("factura-saas-concepto")?.value.trim() || "Cobro de suscripcion SaaS",
+        periodo_inicio: document.getElementById("factura-saas-periodo-inicio")?.value || null,
+        periodo_fin: document.getElementById("factura-saas-periodo-fin")?.value || null,
+        subtotal,
+        impuestos,
+        total,
+        estado: document.getElementById("factura-saas-estado")?.value || "PAGADA",
+        fecha_vencimiento: document.getElementById("factura-saas-vencimiento")?.value || null,
+        metodo_pago: document.getElementById("factura-saas-metodo")?.value.trim() || null,
+        referencia_pago: document.getElementById("factura-saas-referencia")?.value.trim() || null,
+      }),
+    });
+
+    if (typeof showMessage === "function") {
+      showMessage("factura-saas-msg", "Factura SaaS registrada correctamente.");
+    }
+    await cargarEmpresas();
+  } catch (err) {
+    if (typeof showMessage === "function") showMessage("factura-saas-msg", err.message, true);
+  }
+}
+
+let empresasEventsBound = false;
+
+function bindEmpresasEvents() {
+  if (empresasEventsBound) return;
+  empresasEventsBound = true;
+
+  document.getElementById("form-empresa-admin")?.addEventListener("submit", handleGuardarEmpresaAdmin);
+  document.getElementById("empresas-buscar")?.addEventListener("input", renderEmpresasTable);
+  document.getElementById("btn-empresa-cancelar-edicion")?.addEventListener("click", () => {
+    resetEmpresaAdminForm();
+    document.getElementById("empresa-admin-plan-row")?.classList.remove("hidden");
+  });
+  document.getElementById("btn-plan-panel-close")?.addEventListener("click", cerrarPanelPlan);
+  document.getElementById("btn-plan-suspender")?.addEventListener("click", () => handleCambiarEstadoPlan("SUSPENDIDA"));
+  document.getElementById("btn-plan-cancelar")?.addEventListener("click", () => handleCambiarEstadoPlan("CANCELADA"));
+  document.getElementById("btn-modulos-panel-close")?.addEventListener("click", cerrarPanelModulos);
+  document.getElementById("form-panel-plan")?.addEventListener("submit", handleAsignarPlan);
+  document.getElementById("form-licencia-empresa")?.addEventListener("submit", handleAsignarLicenciaEmpresa);
+  document.getElementById("licencia-plan-id")?.addEventListener("change", renderLicenciaPlanModulos);
+  document.getElementById("licencia-empresa-id")?.addEventListener("change", () => syncLicenciaEmpresaForm());
+  document.getElementById("form-suscripcion-saas")?.addEventListener("submit", handleGuardarSuscripcionSaas);
+  document.getElementById("suscripcion-empresa-id")?.addEventListener("change", () => syncSuscripcionSaasForm());
+  document.getElementById("suscripcion-plan-id")?.addEventListener("change", () => {
+    const licencia = getLicenciaById(document.getElementById("suscripcion-plan-id")?.value);
+    if (licencia) {
+      document.getElementById("suscripcion-precio-plan").value = String(Math.round(Number(licencia.precio || 0)));
+    }
+  });
+  document.getElementById("btn-suscripcion-renovar")?.addEventListener("click", handleRenovarSuscripcionSaas);
+  document.getElementById("btn-suscripcion-suspender")?.addEventListener("click", () => handleCambiarEstadoSuscripcionSaas("SUSPENDIDA"));
+  document.getElementById("btn-suscripcion-cancelar")?.addEventListener("click", () => handleCambiarEstadoSuscripcionSaas("CANCELADA"));
+  document.getElementById("form-factura-saas")?.addEventListener("submit", handleRegistrarFacturaSaas);
+  document.getElementById("empresas-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-empresa-action]");
+    if (!button) return;
+    const { empresaAction, empresaId, empresaActiva } = button.dataset;
+    if (empresaAction === "editar") editarEmpresaAdmin(empresaId);
+    if (empresaAction === "plan") abrirPanelPlan(empresaId);
+    if (empresaAction === "modulos") abrirPanelModulos(empresaId);
+    if (empresaAction === "toggle") toggleEmpresaAdmin(empresaId, empresaActiva === "true");
+  });
+  document.getElementById("proximas-vencer-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-empresa-action='plan']");
+    if (!button) return;
+    abrirPanelPlan(button.dataset.empresaId);
+  });
+  document.getElementById("modulos-empresa-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-modulos-action]");
+    if (!button) return;
+    const { modulosAction, moduloId, moduloActivo } = button.dataset;
+    if (modulosAction === "override") guardarOverrideModulo(moduloId, moduloActivo === "true");
+    if (modulosAction === "reset") eliminarOverrideModulo(moduloId);
+  });
+}
+
+window.AG360.registerModule({
+  id: "empresas",
+  title: "Empresas",
+  licenseModule: "empresas",
+  icon: "🏢",
+  order: 30,
+  isVisible: userIsSuperAdmin,
+  bindEvents: bindEmpresasEvents,
+  onEnter: cargarEmpresas,
+});

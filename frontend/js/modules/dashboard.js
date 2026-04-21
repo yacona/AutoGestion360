@@ -321,3 +321,33 @@ async function loadDashboard() {
 
   await cargarAlertasInteligentes();
 }
+
+let dashboardEventsBound = false;
+
+function bindDashboardEvents() {
+  if (dashboardEventsBound) return;
+  dashboardEventsBound = true;
+
+  document.getElementById("dash-fecha")?.addEventListener("change", loadDashboard);
+  document.getElementById("btn-refresh-alertas")?.addEventListener("click", cargarAlertasInteligentes);
+  document.getElementById("dash-alertas-list")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-alert-action]");
+    if (!button) return;
+    abrirAccionAlerta(button.dataset.alertModule, button.dataset.alertReferenceType);
+  });
+  document.getElementById("btn-dash-hoy")?.addEventListener("click", () => {
+    const input = document.getElementById("dash-fecha");
+    if (input) input.value = formatDateParam(new Date());
+    loadDashboard();
+  });
+}
+
+window.AG360.registerModule({
+  id: "dashboard",
+  title: "Dashboard",
+  licenseModule: "dashboard",
+  icon: "🧭",
+  order: 10,
+  bindEvents: bindDashboardEvents,
+  onEnter: loadDashboard,
+});

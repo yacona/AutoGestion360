@@ -623,3 +623,46 @@ async function confirmarCobroServicio() {
     showCobroServicioMessage(cobroServicioActual.successMessageId, err.message, true);
   }
 }
+
+function renderSidebarMenu(items = []) {
+  const nav = document.getElementById("sidebar-nav") || document.querySelector(".sidebar-nav");
+  if (!nav) return;
+
+  nav.innerHTML = items.map((item) => {
+    const classes = ["nav-link"];
+    if (item.active) classes.push("active");
+    if (!item.allowed) classes.push("module-locked");
+    if (item.allowed) classes.push("module-included");
+
+    const icon = item.icon ? `<span class="nav-link-icon" aria-hidden="true">${item.icon}</span>` : "";
+    const tooltip = item.allowed ? "" : getModuleBlockedMessage(item.licenseModule);
+
+    return `
+      <button
+        type="button"
+        class="${classes.join(" ")}"
+        data-view="${escapeHtml(item.id)}"
+        ${item.licenseModule ? `data-license-module="${escapeHtml(item.licenseModule)}"` : ""}
+        aria-disabled="${String(!item.allowed)}"
+        title="${escapeHtml(tooltip)}"
+      >
+        ${icon}
+        <span>${escapeHtml(item.label)}</span>
+      </button>
+    `;
+  }).join("");
+}
+
+let globalUiEventsBound = false;
+
+function bindGlobalUiEvents() {
+  if (globalUiEventsBound) return;
+  globalUiEventsBound = true;
+
+  document.getElementById("cobro-metodo-pago")?.addEventListener("change", () => {
+    actualizarCamposPagoServicio("cobro-metodo-pago", "cobro-referencia-group", "cobro-detalle-pago-group");
+  });
+  document.getElementById("btn-confirmar-cobro-servicio")?.addEventListener("click", confirmarCobroServicio);
+  document.getElementById("btn-cobro-servicio-close")?.addEventListener("click", cerrarModalCobroServicio);
+  document.getElementById("btn-cobro-servicio-cancel")?.addEventListener("click", cerrarModalCobroServicio);
+}

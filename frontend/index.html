@@ -81,7 +81,7 @@
           </div>
         </div>
 
-        <nav class="sidebar-nav">
+        <nav id="sidebar-nav" class="sidebar-nav" aria-label="Navegacion principal">
           <button class="nav-link active" data-view="dashboard" data-license-module="dashboard">
             🧭 Dashboard
           </button>
@@ -646,7 +646,7 @@
                   <button type="submit" class="btn btn-primary">
                     Registrar entrada
                   </button>
-                  <button type="button" class="btn btn-secondary" onclick="limpiarFormularioParqueadero()">
+                  <button type="button" id="btn-pq-limpiar-form" class="btn btn-secondary">
                     Limpiar formulario
                   </button>
                 </div>
@@ -2397,10 +2397,10 @@
                   <h3 id="plan-panel-titulo">Plan del tenant</h3>
                   <p class="small-text">Cambia el plan activo, el ciclo y el estado de la suscripción.</p>
                 </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="cerrarPanelPlan()">✕ Cerrar</button>
+                <button type="button" id="btn-plan-panel-close" class="btn btn-secondary btn-sm">✕ Cerrar</button>
               </div>
 
-              <form id="form-panel-plan" onsubmit="handleAsignarPlan(event)">
+              <form id="form-panel-plan">
                 <input type="hidden" id="plan-empresa-id" />
                 <div class="form-row">
                   <div class="form-group">
@@ -2442,8 +2442,8 @@
                 </div>
                 <div class="form-actions">
                   <button type="submit" class="btn btn-primary">Guardar plan</button>
-                  <button type="button" class="btn btn-warning" onclick="handleCambiarEstadoPlan('SUSPENDIDA')">Suspender</button>
-                  <button type="button" class="btn btn-danger"  onclick="handleCambiarEstadoPlan('CANCELADA')">Cancelar suscripción</button>
+                  <button type="button" id="btn-plan-suspender" class="btn btn-warning">Suspender</button>
+                  <button type="button" id="btn-plan-cancelar" class="btn btn-danger">Cancelar suscripción</button>
                 </div>
                 <div id="plan-msg" class="small-message" hidden></div>
               </form>
@@ -2463,7 +2463,7 @@
                     <strong>Desactivado</strong> = bloqueado aunque el plan lo incluya.
                   </p>
                 </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="cerrarPanelModulos()">✕ Cerrar</button>
+                <button type="button" id="btn-modulos-panel-close" class="btn btn-secondary btn-sm">✕ Cerrar</button>
               </div>
 
               <div id="modulos-empresa-msg" class="small-message" hidden></div>
@@ -2917,7 +2917,7 @@
   <div class="modal-content modal-lg">
     <div class="modal-header">
       <h3>Confirmar salida y registrar pago</h3>
-      <button class="modal-close" onclick="cerrarModalSalida()">✕</button>
+      <button id="btn-modal-salida-close" class="modal-close">✕</button>
     </div>
 
     <div id="salida-resumen" class="modal-body">
@@ -3027,7 +3027,7 @@
 
       <!-- Botón para editar datos antes de confirmar -->
       <div class="form-section">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleEditarRegistro()">
+        <button type="button" id="btn-salida-toggle-editar" class="btn btn-ghost btn-sm">
           ✏️ Editar datos del registro
         </button>
       </div>
@@ -3055,15 +3055,15 @@
             <option value="CUATRIMOTO">CUATRIMOTO</option>
           </select>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="guardarEdicionRegistro()">
+        <button type="button" id="btn-salida-guardar" class="btn btn-secondary btn-sm">
           💾 Guardar cambios
         </button>
       </div>
     </div>
 
     <div class="modal-footer">
-      <button type="button" class="btn btn-secondary" onclick="cerrarModalSalida()">Cancelar</button>
-      <button type="button" class="btn btn-primary btn-lg" onclick="confirmarSalida()">✓ Confirmar salida y pago</button>
+      <button type="button" id="btn-modal-salida-cancelar" class="btn btn-secondary">Cancelar</button>
+      <button type="button" id="btn-modal-salida-confirmar" class="btn btn-primary btn-lg">✓ Confirmar salida y pago</button>
     </div>
   </div>
 </div>
@@ -3073,7 +3073,7 @@
   <div class="modal-content modal-lg">
     <div class="modal-header">
       <h3 id="cobro-servicio-title">Confirmar servicio y registrar pago</h3>
-      <button type="button" class="modal-close" onclick="cerrarModalCobroServicio()">✕</button>
+      <button type="button" id="btn-cobro-servicio-close" class="modal-close">✕</button>
     </div>
 
     <div class="modal-body">
@@ -3180,8 +3180,8 @@
     </div>
 
     <div class="modal-footer">
-      <button type="button" class="btn btn-secondary" onclick="cerrarModalCobroServicio()">Cancelar</button>
-      <button type="button" id="btn-confirmar-cobro-servicio" class="btn btn-primary btn-lg" onclick="confirmarCobroServicio()">✓ Confirmar servicio y pago</button>
+      <button type="button" id="btn-cobro-servicio-cancel" class="btn btn-secondary">Cancelar</button>
+      <button type="button" id="btn-confirmar-cobro-servicio" class="btn btn-primary btn-lg">✓ Confirmar servicio y pago</button>
     </div>
   </div>
 </div>
@@ -3190,15 +3190,15 @@
   <div class="modal-content modal-xl">
     <div class="modal-header">
       <h3 id="recibo-modal-title">Comprobante</h3>
-      <button type="button" class="modal-close" onclick="cerrarModalRecibo()">✕</button>
+      <button type="button" id="btn-recibo-close-top" class="modal-close">✕</button>
     </div>
     <div class="modal-body">
       <div id="recibo-print-area" class="receipt-document"></div>
     </div>
     <div class="modal-footer">
-      <button type="button" class="btn btn-secondary" onclick="descargarReciboHtml()">Descargar HTML</button>
-      <button type="button" class="btn btn-primary" onclick="imprimirRecibo()">Imprimir</button>
-      <button type="button" class="btn btn-secondary" onclick="cerrarModalRecibo()">Cerrar</button>
+      <button type="button" id="btn-recibo-download" class="btn btn-secondary">Descargar HTML</button>
+      <button type="button" id="btn-recibo-print" class="btn btn-primary">Imprimir</button>
+      <button type="button" id="btn-recibo-close" class="btn btn-secondary">Cerrar</button>
     </div>
   </div>
 </div>

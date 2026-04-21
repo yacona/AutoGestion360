@@ -1,11 +1,11 @@
 /* =========================================================
-   ROUTER — navegación SPA, permisos de vista, módulo catalog
-   Depende de: storage.js, ui.js, auth.js
+   ROUTER
+   Navegacion SPA basada en modulos registrados.
    ========================================================= */
 
 const VIEW_TITLES = {
   dashboard: "Dashboard",
-  modulos: "Módulos",
+  modulos: "Modulos",
   empresas: "Empresas",
   usuarios: "Usuarios",
   parqueadero: "Parqueadero",
@@ -14,83 +14,155 @@ const VIEW_TITLES = {
   clientes: "Clientes",
   empleados: "Empleados",
   reportes: "Reportes",
-  config: "Configuración",
-};
-
-const VIEW_LICENSE_MODULES = {
-  dashboard: "dashboard",
-  empresas: "empresas",
-  parqueadero: "parqueadero",
-  lavadero: "lavadero",
-  taller: "taller",
-  clientes: "clientes",
-  empleados: "empleados",
-  usuarios: "usuarios",
-  reportes: "reportes",
-  config: "configuracion",
+  config: "Configuracion",
 };
 
 const ALWAYS_AVAILABLE_MODULES = new Set(["dashboard"]);
 
+const STATIC_VIEWS = {
+  modulos: {
+    id: "modulos",
+    title: "Modulos",
+    licenseModule: null,
+    icon: "🧩",
+    order: 20,
+    menu: true,
+  },
+};
+
+function createLegacyViewDefinition(id, fallback = {}) {
+  const callbacks = {
+    empresas: () => (typeof cargarEmpresas === "function" ? cargarEmpresas() : null),
+    usuarios: () => (typeof cargarUsuariosSistema === "function" ? cargarUsuariosSistema() : null),
+    config: () => (typeof loadConfig === "function" ? loadConfig() : null),
+  };
+
+  const visibility = {
+    empresas: () => userIsSuperAdmin(),
+    usuarios: () => userCanManageUsers(),
+  };
+
+  return {
+    id,
+    title: VIEW_TITLES[id] || fallback.title || id,
+    licenseModule: fallback.licenseModule ?? id,
+    icon: fallback.icon || "",
+    order: fallback.order ?? 100,
+    menu: fallback.menu ?? true,
+    isVisible: visibility[id] || (() => true),
+    onEnter: callbacks[id] || fallback.onEnter || null,
+  };
+}
+
+function getViewDefinitions() {
+  const registered = window.AG360.getModules().reduce((acc, moduleDefinition) => {
+    acc[moduleDefinition.id] = {
+      menu: true,
+      isVisible: () => true,
+      ...moduleDefinition,
+      title: moduleDefinition.title || VIEW_TITLES[moduleDefinition.id] || moduleDefinition.id,
+    };
+    return acc;
+  }, {});
+
+  ["dashboard", "empresas", "usuarios", "config"].forEach((viewId) => {
+    if (!registered[viewId]) {
+      registered[viewId] = createLegacyViewDefinition(viewId, {
+        icon: viewId === "dashboard" ? "🧭" : viewId === "empresas" ? "🏢" : viewId === "usuarios" ? "🔐" : "⚙",
+        order: viewId === "dashboard" ? 10 : viewId === "empresas" ? 30 : viewId === "usuarios" ? 80 : 110,
+        licenseModule: viewId === "config" ? "configuracion" : viewId,
+      });
+    }
+  });
+
+  return {
+    ...STATIC_VIEWS,
+    ...registered,
+  };
+}
+
+function getViewDefinition(view) {
+  return getViewDefinitions()[view] || null;
+}
+
+function getSidebarMenuItems(activeView = "") {
+  return Object.values(getViewDefinitions())
+    .filter((item) => item.menu !== false)
+    .filter((item) => (typeof item.isVisible === "function" ? item.isVisible() : true))
+    .sort((a, b) => Number(a.order || 0) - Number(b.order || 0))
+    .map((item) => ({
+      id: item.id,
+      label: item.title,
+      icon: item.icon || "",
+      active: item.id === activeView,
+      licenseModule: item.licenseModule,
+      allowed: item.licenseModule ? isModuleAllowed(item.licenseModule) : true,
+    }));
+}
+
+function renderSidebar(activeView = "") {
+  renderSidebarMenu(getSidebarMenuItems(activeView));
+}
+
 function applyPermissionVisibility() {
-  const canManageCompanies = userIsSuperAdmin();
-  document.querySelectorAll("[data-superadmin-only]").forEach((el) => {
-    el.classList.toggle("hidden", !canManageCompanies);
+  renderSidebar(getActiveViewName());
+
+  document.querySelectorAll("[data-superadmin-only]").forEach((element) => {
+    element.classList.toggle("hidden", !userIsSuperAdmin());
   });
 
-  const canManageUsers = userCanManageUsers();
-  document.querySelectorAll("[data-useradmin-only]").forEach((el) => {
-    el.classList.toggle("hidden", !canManageUsers);
+  document.querySelectorAll("[data-useradmin-only]").forEach((element) => {
+    element.classList.toggle("hidden", !userCanManageUsers());
   });
 
-  document.querySelectorAll("[data-license-module]").forEach((el) => {
-    const moduleName = el.dataset.licenseModule;
+  document.querySelectorAll("[data-license-module]").forEach((element) => {
+    const moduleName = element.dataset.licenseModule;
     const allowed = isModuleAllowed(moduleName);
-    el.classList.toggle("module-locked", !allowed);
-    el.classList.toggle("module-included", allowed);
-    el.setAttribute("aria-disabled", String(!allowed));
-    el.title = allowed ? "" : getModuleBlockedMessage(moduleName);
-    if (el.classList.contains("module-tile-enabled")) el.tabIndex = allowed ? 0 : -1;
+    element.classList.toggle("module-locked", !allowed);
+    element.classList.toggle("module-included", allowed);
+    element.setAttribute("aria-disabled", String(!allowed));
+    element.title = allowed ? "" : getModuleBlockedMessage(moduleName);
+
+    if (element.classList.contains("module-tile-enabled")) {
+      element.tabIndex = allowed ? 0 : -1;
+    }
   });
 }
 
 function changeView(view) {
+  const definition = getViewDefinition(view);
   const targetView = document.getElementById(`view-${view}`);
-  if (!targetView) return false;
 
-  if (view === "empresas" && !userIsSuperAdmin()) { changeView("dashboard"); return false; }
-  if (view === "usuarios" && !userCanManageUsers()) { changeView("dashboard"); return false; }
+  if (!definition || !targetView) return false;
 
-  const licenseModule = VIEW_LICENSE_MODULES[view];
-  if (!isModuleAllowed(licenseModule)) {
-    showModuleBlockedMessage(licenseModule);
-    changeView("modulos");
+  if (typeof definition.isVisible === "function" && !definition.isVisible()) {
+    changeView("dashboard");
     return false;
   }
 
-  document.querySelectorAll(".view").forEach((v) => v.classList.remove("visible"));
+  if (definition.licenseModule && !isModuleAllowed(definition.licenseModule)) {
+    showModuleBlockedMessage(definition.licenseModule);
+    if (view !== "modulos") changeView("modulos");
+    return false;
+  }
+
+  document.querySelectorAll(".view").forEach((viewElement) => {
+    viewElement.classList.remove("visible");
+  });
   targetView.classList.add("visible");
 
-  document.querySelectorAll(".nav-link").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.view === view);
-  });
+  renderSidebar(view);
 
-  document.getElementById("current-view-title").textContent = VIEW_TITLES[view] || view.toUpperCase();
-
-  if (view === "parqueadero") {
-    cargarParqueaderoActivo();
-    cargarHistorialParqueadero();
-    cargarMensualidadesParqueadero();
+  const title = document.getElementById("current-view-title");
+  if (title) {
+    title.textContent = definition.title || VIEW_TITLES[view] || view.toUpperCase();
   }
-  if (view === "dashboard") loadDashboard();
-  if (view === "empresas") cargarEmpresas();
-  if (view === "usuarios") cargarUsuariosSistema();
-  if (view === "lavadero") { loadLavaderoEmpleados(); cargarOrdeneesLavadero(); }
-  if (view === "taller") { loadTallerMecanicos(); cargarOrdensTaller(); }
-  if (view === "clientes") cargarListaClientes();
-  if (view === "empleados") cargarListaEmpleados();
-  if (view === "reportes") { setFechasDefecto(); handleGenerarReportes(); }
-  if (view === "config") loadConfig();
+
+  if (typeof definition.onEnter === "function") {
+    Promise.resolve(definition.onEnter()).catch((error) => {
+      console.error(`Error entrando a la vista ${view}:`, error);
+    });
+  }
 
   return true;
 }
@@ -107,8 +179,13 @@ function openModuleTile(tile) {
   const changed = changeView(view);
   if (!changed) return;
 
-  if (view === "config" && tile.dataset.openConfigTab) setConfigTab(tile.dataset.openConfigTab);
-  if (view === "parqueadero" && tile.dataset.parkingFlow) seleccionarFlujoParqueadero(tile.dataset.parkingFlow);
+  if (view === "config" && tile.dataset.openConfigTab) {
+    setConfigTab(tile.dataset.openConfigTab);
+  }
+
+  if (view === "parqueadero" && tile.dataset.parkingFlow) {
+    seleccionarFlujoParqueadero(tile.dataset.parkingFlow);
+  }
 }
 
 function initModuleCatalog() {
@@ -138,6 +215,19 @@ function setConfigTab(tab = "empresa") {
     panel.classList.toggle("hidden", !samePanel || (adminOnly && !userIsSuperAdmin()));
   });
 
-  if (selectedTab === "parqueadero") loadParqueaderoConfig();
-  if (selectedTab === "licencias") loadLicenciaInfo();
+  if (selectedTab === "parqueadero" && typeof loadParqueaderoConfig === "function") {
+    loadParqueaderoConfig();
+  }
+  if (selectedTab === "licencias" && typeof loadLicenciaInfo === "function") {
+    loadLicenciaInfo();
+  }
 }
+
+window.AG360.core.router = {
+  getViewDefinitions,
+  getViewDefinition,
+  getSidebarMenuItems,
+  renderSidebar,
+  applyPermissionVisibility,
+  changeView,
+};

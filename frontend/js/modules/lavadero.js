@@ -71,7 +71,7 @@ async function cargarOrdeneesLavadero() {
           <td>${new Date(ord.hora_inicio).toLocaleString()}</td>
           <td>${renderBadge(ord.estado)}</td>
           <td>
-            <button class="btn btn-sm btn-primary" onclick="marcarLavadoCompleto(${ord.id})">Completar y cobrar</button>
+            <button type="button" class="btn btn-sm btn-primary" data-lav-action="completar" data-lavado-id="${ord.id}">Completar y cobrar</button>
           </td>
         </tr>
       `).join("");
@@ -114,3 +114,32 @@ async function marcarLavadoCompleto(id) {
     showMessage("lav-msg", err.message, true);
   }
 }
+
+let lavaderoEventsBound = false;
+
+function bindLavaderoEvents() {
+  if (lavaderoEventsBound) return;
+  lavaderoEventsBound = true;
+
+  document.getElementById("form-lavadero-nueva")?.addEventListener("submit", handleNovaLavado);
+  document.getElementById("lav-buscar")?.addEventListener("input", () => cargarOrdeneesLavadero());
+  document.getElementById("lav-historial-buscar")?.addEventListener("input", () => cargarOrdeneesLavadero());
+  document.getElementById("lav-activos-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-lav-action='completar']");
+    if (!button) return;
+    marcarLavadoCompleto(button.dataset.lavadoId);
+  });
+}
+
+window.AG360.registerModule({
+  id: "lavadero",
+  title: "Lavadero",
+  licenseModule: "lavadero",
+  icon: "🚿",
+  order: 50,
+  bindEvents: bindLavaderoEvents,
+  onEnter: async () => {
+    await loadLavaderoEmpleados();
+    await cargarOrdeneesLavadero();
+  },
+});

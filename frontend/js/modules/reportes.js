@@ -122,7 +122,9 @@ function renderCajaPendientes(pendientes = []) {
       <td>
         <div class="table-actions">
           <button type="button" class="btn btn-sm btn-primary"
-            onclick="abrirPagoPendiente('${escapeHtml(item.modulo || "")}','${escapeHtml(item.referencia_id || "")}')">
+            data-reportes-action="cobrar"
+            data-reportes-modulo="${escapeHtml(item.modulo || "")}"
+            data-reportes-referencia="${escapeHtml(item.referencia_id || "")}">
             ${item.monto_pagado > 0 ? "Abonar" : "Cobrar"}
           </button>
         </div>
@@ -236,7 +238,7 @@ function renderCajaArqueos(arqueos = []) {
         <td><span class="badge ${diffClass}">${formatMoney(diferencia)}</span></td>
         <td>${escapeHtml(arqueo.usuario_nombre || "Usuario")}</td>
         <td>
-          <button type="button" class="btn btn-sm btn-secondary" onclick="abrirReciboArqueo(${Number(arqueo.id)})">Comprobante</button>
+          <button type="button" class="btn btn-sm btn-secondary" data-reportes-action="comprobante" data-arqueo-id="${Number(arqueo.id)}">Comprobante</button>
         </td>
       </tr>
     `;
@@ -461,3 +463,41 @@ function exportReportesCSV() {
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+let reportesEventsBound = false;
+
+function bindReportesEvents() {
+  if (reportesEventsBound) return;
+  reportesEventsBound = true;
+
+  document.getElementById("form-rep-filtro")?.addEventListener("submit", handleGenerarReportes);
+  document.getElementById("btn-rep-hoy")?.addEventListener("click", () => setReportRangeAndGenerate(0));
+  document.getElementById("btn-rep-7")?.addEventListener("click", () => setReportRangeAndGenerate(6));
+  document.getElementById("btn-rep-30")?.addEventListener("click", () => setReportRangeAndGenerate(30));
+  document.getElementById("btn-rep-exportar")?.addEventListener("click", exportReportesCSV);
+  document.getElementById("form-caja-arqueo")?.addEventListener("submit", handleGuardarArqueoCaja);
+  document.getElementById("rep-caja-efectivo-contado")?.addEventListener("input", actualizarDiferenciaArqueo);
+  document.getElementById("rep-caja-pendientes-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-reportes-action='cobrar']");
+    if (!button) return;
+    abrirPagoPendiente(button.dataset.reportesModulo, button.dataset.reportesReferencia);
+  });
+  document.getElementById("rep-caja-arqueos-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-reportes-action='comprobante']");
+    if (!button) return;
+    abrirReciboArqueo(button.dataset.arqueoId);
+  });
+}
+
+window.AG360.registerModule({
+  id: "reportes",
+  title: "Reportes",
+  licenseModule: "reportes",
+  icon: "📊",
+  order: 100,
+  bindEvents: bindReportesEvents,
+  onEnter: () => {
+    setFechasDefecto();
+    return handleGenerarReportes();
+  },
+});

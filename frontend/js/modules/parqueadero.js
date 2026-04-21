@@ -534,3 +534,42 @@ async function confirmarSalida() {
     alert(err.message || "Error registrando salida.");
   }
 }
+
+let parqueaderoEventsBound = false;
+
+function bindParqueaderoEvents() {
+  if (parqueaderoEventsBound) return;
+  parqueaderoEventsBound = true;
+
+  document.getElementById("form-parqueadero-entrada")?.addEventListener("submit", handleEntradaParqueadero);
+  document.getElementById("form-parqueadero-mensualidad")?.addEventListener("submit", handleNuevaMensualidadParqueadero);
+  document.getElementById("btn-pq-limpiar-form")?.addEventListener("click", limpiarFormularioParqueadero);
+  document.getElementById("btn-pq-ingreso-ocasional")?.addEventListener("click", () => seleccionarFlujoParqueadero("ocasional"));
+  document.getElementById("btn-pq-ingreso-dia")?.addEventListener("click", () => seleccionarFlujoParqueadero("dia"));
+  document.getElementById("btn-pq-ingreso-mensualidad")?.addEventListener("click", () => seleccionarFlujoParqueadero("mensualidad"));
+  document.getElementById("btn-pq-alta-mensualidad")?.addEventListener("click", () => seleccionarFlujoParqueadero("alta"));
+  document.getElementById("pq-tbody")?.addEventListener("click", handleSalidaClick);
+  document.getElementById("pq-historial-buscar")?.addEventListener("input", () => cargarHistorialParqueadero());
+  document.getElementById("pq-metodo-pago")?.addEventListener("change", () => {
+    actualizarCamposPagoServicio("pq-metodo-pago", "pq-referencia-group", "pq-detalle-pago-group");
+  });
+  document.getElementById("btn-modal-salida-close")?.addEventListener("click", cerrarModalSalida);
+  document.getElementById("btn-modal-salida-cancelar")?.addEventListener("click", cerrarModalSalida);
+  document.getElementById("btn-salida-toggle-editar")?.addEventListener("click", toggleEditarRegistro);
+  document.getElementById("btn-salida-guardar")?.addEventListener("click", guardarEdicionRegistro);
+  document.getElementById("btn-modal-salida-confirmar")?.addEventListener("click", confirmarSalida);
+}
+
+window.AG360.registerModule({
+  id: "parqueadero",
+  title: "Parqueadero",
+  licenseModule: "parqueadero",
+  icon: "🅿",
+  order: 40,
+  bindEvents: bindParqueaderoEvents,
+  onEnter: async () => {
+    await cargarParqueaderoActivo();
+    await cargarHistorialParqueadero();
+    await cargarMensualidadesParqueadero();
+  },
+});

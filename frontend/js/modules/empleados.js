@@ -45,7 +45,7 @@ async function cargarListaEmpleados() {
           <td>${emp.email || "N/A"}</td>
           <td>${new Date(emp.fecha_registro || emp.created_at).toLocaleDateString()}</td>
           <td>
-            <button class="btn btn-sm btn-danger" onclick="desactivarEmpleado(${emp.id})">Desactivar</button>
+            <button type="button" class="btn btn-sm btn-danger" data-empleado-action="desactivar" data-empleado-id="${emp.id}">Desactivar</button>
           </td>
         </tr>
       `).join("");
@@ -74,3 +74,28 @@ async function desactivarEmpleado(id) {
     showMessage("emp-msg", err.message, true);
   }
 }
+
+let empleadosEventsBound = false;
+
+function bindEmpleadosEvents() {
+  if (empleadosEventsBound) return;
+  empleadosEventsBound = true;
+
+  document.getElementById("form-empleado-nuevo")?.addEventListener("submit", handleNuevoEmpleado);
+  document.getElementById("emp-filtro-rol")?.addEventListener("change", filtrarEmpleadosPorRol);
+  document.getElementById("emp-lista-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-empleado-action='desactivar']");
+    if (!button) return;
+    desactivarEmpleado(button.dataset.empleadoId);
+  });
+}
+
+window.AG360.registerModule({
+  id: "empleados",
+  title: "Empleados",
+  licenseModule: "empleados",
+  icon: "🧑‍🔧",
+  order: 90,
+  bindEvents: bindEmpleadosEvents,
+  onEnter: cargarListaEmpleados,
+});

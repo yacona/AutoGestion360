@@ -160,7 +160,7 @@ function renderClientesTable(clientes) {
         <td>${formatMoney(toClientNumber(cli.total_gastado))}</td>
         <td>${formatClientDate(cli.ultima_actividad || cli.fecha_registro)}</td>
         <td><span class="badge ${status.className}">${status.label}</span></td>
-        <td><button class="btn btn-sm btn-secondary" onclick="verDetallesCliente(${Number(cli.id)})">Ver perfil</button></td>
+        <td><button type="button" class="btn btn-sm btn-secondary" data-cliente-action="ver-perfil" data-cliente-id="${Number(cli.id)}">Ver perfil</button></td>
       </tr>
     `;
   }).join("");
@@ -437,7 +437,7 @@ function renderClienteVehiculos(vehiculos = []) {
         <div class="client-vehicle-meta">
           <span class="badge badge-muted">${toClientNumber(v.total_servicios)} servicios</span>
           <strong>${formatMoney(toClientNumber(v.total_gastado))}</strong>
-          <button type="button" class="btn btn-sm btn-secondary" onclick="verVehiculo360('${encodeURIComponent(placa)}')">Ver 360</button>
+          <button type="button" class="btn btn-sm btn-secondary" data-cliente-action="ver-vehiculo" data-vehiculo-placa="${encodeURIComponent(placa)}">Ver 360</button>
         </div>
       </article>
     `;
@@ -704,10 +704,10 @@ function renderCarteraActions(item, mode = "pendientes") {
   const referenciaId = escapeHtml(item.referencia_id || "");
   const acciones = [];
   if (mode !== "pagos" && ["PENDIENTE", "ABONADO"].includes(item.estado_cartera) && modulo && referenciaId) {
-    acciones.push(`<button type="button" class="btn btn-sm btn-primary" onclick="abrirPagoPendiente('${modulo}','${referenciaId}')">${item.estado_cartera === "ABONADO" ? "Abonar" : "Cobrar"}</button>`);
+    acciones.push(`<button type="button" class="btn btn-sm btn-primary" data-cartera-action="cobrar" data-cartera-modulo="${modulo}" data-cartera-referencia="${referenciaId}">${item.estado_cartera === "ABONADO" ? "Abonar" : "Cobrar"}</button>`);
   }
   if (modulo && referenciaId) {
-    acciones.push(`<button type="button" class="btn btn-sm btn-secondary" onclick="abrirReciboServicio('${modulo}','${referenciaId}')">Recibo</button>`);
+    acciones.push(`<button type="button" class="btn btn-sm btn-secondary" data-cartera-action="recibo" data-cartera-modulo="${modulo}" data-cartera-referencia="${referenciaId}">Recibo</button>`);
   }
   return acciones.length ? `<div class="table-actions">${acciones.join("")}</div>` : "—";
 }
@@ -1026,3 +1026,64 @@ async function abrirReciboVehiculo360() {
     setClienteActionMessage(err.message || "No se pudo generar el comprobante del vehículo.", true);
   }
 }
+
+let clientesEventsBound = false;
+
+function bindClientesEvents() {
+  if (clientesEventsBound) return;
+  clientesEventsBound = true;
+
+  document.getElementById("form-cliente-nuevo")?.addEventListener("submit", handleNuevoCliente);
+  document.getElementById("cli-buscar")?.addEventListener("input", filtrarClientes);
+  document.getElementById("cli-perfil-close")?.addEventListener("click", cerrarPerfilCliente);
+  document.getElementById("cli-action-editar")?.addEventListener("click", () => abrirClienteActionPanel("editar"));
+  document.getElementById("cli-action-vehiculo")?.addEventListener("click", () => abrirClienteActionPanel("vehiculo"));
+  document.getElementById("cli-action-mensualidad")?.addEventListener("click", () => abrirClienteActionPanel("mensualidad"));
+  document.getElementById("form-cli-editar")?.addEventListener("submit", handleEditarCliente360);
+  document.getElementById("form-cli-vehiculo")?.addEventListener("submit", handleAgregarVehiculoCliente360);
+  document.getElementById("form-cli-mensualidad")?.addEventListener("submit", handleCrearMensualidadCliente360);
+  document.getElementById("cli-men-vehiculo")?.addEventListener("change", sincronizarVehiculoMensualidadCliente);
+  document.getElementById("cli-recibo-cliente")?.addEventListener("click", abrirReciboCliente360);
+  document.getElementById("veh360-close")?.addEventListener("click", cerrarVehiculo360);
+  document.getElementById("veh360-action-parqueadero")?.addEventListener("click", iniciarIngresoVehiculo360);
+  document.getElementById("veh360-action-lavadero")?.addEventListener("click", iniciarLavadoVehiculo360);
+  document.getElementById("veh360-action-taller")?.addEventListener("click", iniciarTallerVehiculo360);
+  document.getElementById("veh360-action-mensualidad")?.addEventListener("click", iniciarMensualidadVehiculo360);
+  document.getElementById("veh360-action-recibo")?.addEventListener("click", abrirReciboVehiculo360);
+  document.getElementById("btn-recibo-close-top")?.addEventListener("click", cerrarModalRecibo);
+  document.getElementById("btn-recibo-close")?.addEventListener("click", cerrarModalRecibo);
+  document.getElementById("btn-recibo-download")?.addEventListener("click", descargarReciboHtml);
+  document.getElementById("btn-recibo-print")?.addEventListener("click", imprimirRecibo);
+  document.getElementById("cli-lista-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cliente-action='ver-perfil']");
+    if (!button) return;
+    verDetallesCliente(button.dataset.clienteId);
+  });
+  document.getElementById("cli-vehiculos-grid")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-cliente-action='ver-vehiculo']");
+    if (!button) return;
+    verVehiculo360(button.dataset.vehiculoPlaca);
+  });
+  ["cli-cartera-pendientes-tbody", "cli-cartera-pagos-tbody"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-cartera-action]");
+      if (!button) return;
+      const { carteraAction, carteraModulo, carteraReferencia } = button.dataset;
+      if (carteraAction === "cobrar") abrirPagoPendiente(carteraModulo, carteraReferencia);
+      if (carteraAction === "recibo") abrirReciboServicio(carteraModulo, carteraReferencia);
+    });
+  });
+  document.querySelectorAll("[data-cli-action-cancel]").forEach((button) => {
+    button.addEventListener("click", cerrarClienteActionPanels);
+  });
+}
+
+window.AG360.registerModule({
+  id: "clientes",
+  title: "Clientes",
+  licenseModule: "clientes",
+  icon: "👥",
+  order: 70,
+  bindEvents: bindClientesEvents,
+  onEnter: cargarListaClientes,
+});

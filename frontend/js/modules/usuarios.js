@@ -86,9 +86,9 @@ function renderUsuariosSistemaTable() {
         <td>${new Date(usuario.creado_en).toLocaleDateString()}</td>
         <td>
           <div class="table-actions">
-            <button type="button" class="btn btn-sm btn-secondary" onclick="editarUsuarioSistema(${usuario.id})">Editar</button>
-            <button type="button" class="btn btn-sm btn-secondary" onclick="resetPasswordUsuarioSistema(${usuario.id})">Clave</button>
-            <button type="button" class="btn btn-sm ${nextClass}" onclick="toggleUsuarioSistema(${usuario.id}, ${nextState})">${nextLabel}</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-usuario-action="editar" data-usuario-id="${usuario.id}">Editar</button>
+            <button type="button" class="btn btn-sm btn-secondary" data-usuario-action="password" data-usuario-id="${usuario.id}">Clave</button>
+            <button type="button" class="btn btn-sm ${nextClass}" data-usuario-action="toggle" data-usuario-id="${usuario.id}" data-usuario-activo="${nextState}">${nextLabel}</button>
           </div>
         </td>
       </tr>
@@ -203,3 +203,34 @@ async function resetPasswordUsuarioSistema(id) {
     showMessage("usuario-msg", error.message, true);
   }
 }
+
+let usuariosEventsBound = false;
+
+function bindUsuariosEvents() {
+  if (usuariosEventsBound) return;
+  usuariosEventsBound = true;
+
+  document.getElementById("form-usuario-sistema")?.addEventListener("submit", handleGuardarUsuarioSistema);
+  document.getElementById("usuarios-buscar")?.addEventListener("input", renderUsuariosSistemaTable);
+  document.getElementById("btn-usuario-cancelar-edicion")?.addEventListener("click", resetUsuarioSistemaForm);
+  document.getElementById("usuarios-tbody")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-usuario-action]");
+    if (!button) return;
+
+    const { usuarioAction, usuarioId, usuarioActivo } = button.dataset;
+    if (usuarioAction === "editar") editarUsuarioSistema(usuarioId);
+    if (usuarioAction === "password") resetPasswordUsuarioSistema(usuarioId);
+    if (usuarioAction === "toggle") toggleUsuarioSistema(usuarioId, usuarioActivo === "true");
+  });
+}
+
+window.AG360.registerModule({
+  id: "usuarios",
+  title: "Usuarios",
+  licenseModule: "usuarios",
+  icon: "🔐",
+  order: 80,
+  isVisible: userCanManageUsers,
+  bindEvents: bindUsuariosEvents,
+  onEnter: cargarUsuariosSistema,
+});

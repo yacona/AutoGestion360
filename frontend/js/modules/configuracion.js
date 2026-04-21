@@ -452,3 +452,36 @@ function toggleParqueaderoConfig() {
   body.classList.toggle("hidden");
   if (chevron) chevron.textContent = body.classList.contains("hidden") ? "›" : "▾";
 }
+
+let configuracionEventsBound = false;
+
+function bindConfiguracionEvents() {
+  if (configuracionEventsBound) return;
+  configuracionEventsBound = true;
+
+  document.getElementById("form-empresa")?.addEventListener("submit", handleActualizarEmpresa);
+  document.getElementById("btn-ver-licencias")?.addEventListener("click", handleVerLicencias);
+  document.getElementById("btn-asignar-licencia")?.addEventListener("click", handleAsignarLicencia);
+  document.getElementById("btn-gestionar-licencia")?.addEventListener("click", handleGestionarPlanActual);
+  document.getElementById("btn-renovar-licencia")?.addEventListener("click", handleGestionarPlanActual);
+  document.getElementById("btn-notificar-vencimientos")?.addEventListener("click", handleNotificarVencimientos);
+  document.getElementById("empresa-logo-file")?.addEventListener("change", handleLogoFileChange);
+  document.getElementById("form-parqueadero-config")?.addEventListener("submit", handleGuardarParqueaderoConfig);
+  document.getElementById("btn-toggle-parqueadero-config")?.addEventListener("click", toggleParqueaderoConfig);
+  document.querySelectorAll(".config-tab").forEach((button) => {
+    button.addEventListener("click", () => setConfigTab(button.dataset.configTab));
+  });
+  document.querySelectorAll("[data-theme-option]").forEach((button) => {
+    button.addEventListener("click", () => applyTheme(button.dataset.themeOption));
+  });
+}
+
+window.AG360.registerModule({
+  id: "config",
+  title: "Configuracion",
+  licenseModule: "configuracion",
+  icon: "⚙",
+  order: 110,
+  bindEvents: bindConfiguracionEvents,
+  onEnter: loadConfig,
+});
