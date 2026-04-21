@@ -3,13 +3,12 @@
 /**
  * admin.controller.js
  *
- * Capa fina sobre services/adminService.js para el panel SuperAdmin.
+ * Capa fina sobre admin.service.js para el panel SuperAdmin.
  * Todos los handlers asumen que el middleware SuperAdmin ya validó el rol
  * (ver admin.routes.js).
  */
 
-const svc = require('../../../services/adminService');
-const db  = require('../../../db');
+const svc = require('./admin.service');
 const { isSuperAdmin } = require('../../lib/helpers');
 
 // ─── helpers ────────────────────────────────────────────────
@@ -77,12 +76,7 @@ const listarEmpresas = wrap(async (req, res) => {
 
 const getEmpresa = wrap(async (req, res) => {
   const empresaId = Number(req.params.id);
-  const [empresa, modulos] = await Promise.all([
-    svc.getEmpresaCompleta(empresaId),
-    svc.getModulosParaEmpresa(empresaId),
-  ]);
-  if (!empresa) return res.status(404).json({ error: 'Empresa no encontrada.' });
-  res.json({ ...empresa, modulos });
+  res.json(await svc.getEmpresaSaaSDetail(empresaId));
 });
 
 // ─── KPIs SaaS ───────────────────────────────────────────────
@@ -111,19 +105,17 @@ const onboarding = wrap(async (req, res) => {
 
 const getSuscripcion = wrap(async (req, res) => {
   const empresaId = Number(req.params.empresaId);
-  const { rows } = await db.query(`
-    SELECT s.*, p.codigo AS plan_codigo, p.nombre AS plan_nombre,
-           p.precio_mensual, p.precio_anual,
-           p.max_usuarios, p.max_vehiculos, p.max_empleados
-    FROM suscripciones s
-    JOIN planes p ON p.id = s.plan_id
-    WHERE s.empresa_id = $1 AND s.estado IN ('TRIAL','ACTIVA')
-    LIMIT 1
-  `, [empresaId]);
-  if (rows.length === 0) {
-    return res.json({ suscripcion: null, mensaje: 'Sin suscripción activa.' });
-  }
-  res.json(rows[0]);
+  res.json(await svc.getSuscripcionActual(empresaId));
+});
+
+const getSuscripcionHistorial = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  res.json(await svc.getHistorialSuscripciones(empresaId));
+});
+
+const getEstadoSaaS = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  res.json(await svc.getEstadoSaaSConsolidado(empresaId));
 });
 
 const asignarPlan = wrap(async (req, res) => {
@@ -272,11 +264,13 @@ module.exports = {
   onboarding,
   // Suscripciones
   getSuscripcion,
+  getSuscripcionHistorial,
   asignarPlan,
   upgradePlan,
   downgradePlan,
   reactivarSuscripcion,
   cambiarEstadoSuscripcion,
+  getEstadoSaaS,
   // Límites
   getLimites,
   // Overrides

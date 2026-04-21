@@ -29,6 +29,7 @@
  *
  * Suscripciones por empresa
  *   GET    /suscripcion/:empresaId              → suscripción activa
+ *   GET    /suscripcion/:empresaId/historial    → historial de suscripciones
  *   POST   /suscripcion/:empresaId              → asignar / cambiar plan
  *   POST   /suscripcion/:empresaId/upgrade      → upgrade de plan
  *   POST   /suscripcion/:empresaId/downgrade    → downgrade de plan
@@ -37,6 +38,7 @@
  *
  * Límites efectivos por empresa
  *   GET    /limites/:empresaId                  → plan + overrides consolidados
+ *   GET    /estado/:empresaId                   → estado SaaS consolidado por empresa
  *
  * Overrides de módulos por empresa
  *   GET    /empresa-modulos/:empresaId          → todos los módulos con estado override
@@ -141,6 +143,10 @@ router.get('/suscripcion/:empresaId',
   validate({ params: empresaIdParamSchema }),
   ctrl.getSuscripcion);
 
+router.get('/suscripcion/:empresaId/historial',
+  validate({ params: empresaIdParamSchema }),
+  ctrl.getSuscripcionHistorial);
+
 // Upgrade / downgrade — semántica diferenciada
 router.post('/suscripcion/:empresaId/upgrade',
   adminMutationLimiter,
@@ -172,6 +178,10 @@ router.post('/suscripcion/:empresaId',
 router.get('/limites/:empresaId',
   validate({ params: empresaIdParamSchema }),
   ctrl.getLimites);
+
+router.get('/estado/:empresaId',
+  validate({ params: empresaIdParamSchema }),
+  ctrl.getEstadoSaaS);
 
 // ─── EMPRESA_MODULOS (overrides) ──────────────────────────────
 

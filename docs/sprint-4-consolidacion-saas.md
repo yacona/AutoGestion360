@@ -2,340 +2,308 @@
 
 Última actualización: 2026-04-21
 
----
+## 1. Diagnóstico del problema actual
 
-## 1. Diagnóstico del estado antes de este sprint
+Antes de este sprint, el backend SaaS tenía una base funcional pero todavía no
+estaba consolidado como producto administrable:
 
-### Problema 1 — Admin fuera del patrón modular
-
-Las rutas del panel SuperAdmin vivían en `routes/admin/planes-admin.js` y
-`routes/admin/empresa-modulos.js`, fuera de `src/modules/`. Toda la lógica de
-negocio SaaS estaba acoplada directamente en las rutas o en `services/adminService.js`
-sin capa de controller.
-
-### Problema 2 — Endpoints del catálogo incompletos
-
-El catálogo de planes no exponía:
-- `GET /api/admin/planes/:id` (detalle con módulos)
-- `GET /api/admin/modulos` (catálogo global de módulos)
-- `GET /api/admin/planes/:id/modulos` / `PUT /api/admin/planes/:id/modulos`
-- `GET /api/admin/limites/:empresaId` (límites efectivos consolidados)
-
-El frontend admin no podía operar sin esos endpoints.
-
-### Problema 3 — Lifecycle de suscripciones incompleto
-
-Existía `asignarPlan` y `cambiarEstadoSuscripcion`, pero no había:
-- `upgradePlan` / `downgradePlan` (semántica diferenciada)
-- `reactivarSuscripcion` (suspendida → activa o vencida → activa)
-- Rutas dedicadas: `/upgrade`, `/downgrade`, `/reactivar`
-
-### Problema 4 — Rol de tablas legacy sin definir
-
-Las tablas `suscripciones_empresa` y `facturas_saas` coexistían con el sistema
-nuevo (`suscripciones`, `planes`) sin que quedara claro cuál era la fuente operativa.
-
-### Problema 5 — Resumen SaaS duplicado
-
-`getResumenSaas` existía en `services/adminService.js` (usa `suscripciones` nuevo)
-y también en `src/modules/suscripciones/suscripciones.service.js` (usa
-`suscripciones_empresa` legacy). Los números podían divergir.
-
----
+1. El panel admin estaba partido entre `routes/admin/planes-admin.js` y
+   `routes/admin/empresa-modulos.js`, fuera del patrón modular de `src/modules/`.
+2. El catálogo SaaS no tenía una sola superficie coherente para frontend:
+   faltaban rutas para detalle de plan, módulos del plan, límites efectivos,
+   historial de suscripciones y estado consolidado por empresa.
+3. El lifecycle de suscripciones existía en piezas, pero no estaba formalizado
+   ni en contrato ni en documentación operativa.
+4. `suscripciones_empresa` y `facturas_saas` seguían coexistiendo con el sistema
+   nuevo sin quedar explícitamente etiquetadas como legacy/transicionales.
+5. El frontend admin no tenía un contrato backend/frontend estable con DTOs,
+   pantallas y ejemplos realistas.
 
 ## 2. Decisiones tomadas
 
-### 2.1 Migración de admin a `src/modules/admin/`
+### 2.1 Panel admin consolidado en módulo propio
 
-Se creó el módulo `src/modules/admin/` con el patrón estándar:
+Se dejó el panel admin integrado así:
 
-```
+```text
 src/modules/admin/
-  admin.controller.js   ← handlers finos con wrap()
-  admin.routes.js       ← definición de rutas + validación
+  admin.routes.js
+  admin.controller.js
+  admin.service.js
 ```
 
-`services/adminService.js` se mantiene como la capa de servicio; no se movió
-porque ya estaba bien estructurado y moverlo implicaba actualizar ~12 imports
-sin ganancia real.
+`routes/admin/planes-admin.js` y `routes/admin/empresa-modulos.js` quedan como
+shims de compatibilidad, sin lógica propia.
 
-Los archivos `routes/admin/planes-admin.js` y `routes/admin/empresa-modulos.js`
-se convirtieron en shims que re-exportan el nuevo módulo para preservar
-compatibilidad con cualquier `require()` externo.
+### 2.2 Núcleo de negocio conservado y encapsulado
 
-`src/app.js` ahora monta solo:
+`services/adminService.js` se mantiene como núcleo del catálogo SaaS y del
+lifecycle de suscripciones. El módulo `src/modules/admin/admin.service.js`
+funciona como fachada del panel HTTP y evita duplicar lógica en controller.
+
+### 2.3 Fuente de verdad operativa
+
+La fuente oficial del panel admin y del acceso SaaS queda definida como:
+
+```text
+planes -> plan_modulos -> suscripciones -> empresa_modulos
+```
+
+### 2.4 Legacy documentado, no oculto
+
+Se documenta explícitamente que:
+
+- `suscripciones_empresa` es transicional
+- `facturas_saas` es transicional
+- ninguna de las dos es la fuente de verdad operativa del panel admin
+
+## 3. Arquitectura final del panel SaaS
+
+### Integración en app principal
+
+`src/app.js` monta el panel admin consolidado así:
+
 ```js
 app.use('/api/admin', authMiddleware, adminRoutes);
 ```
 
-### 2.2 Endpoints nuevos añadidos
+### Capas resultantes
 
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| GET | `/api/admin/modulos` | Catálogo global de módulos |
-| GET | `/api/admin/planes/:id` | Detalle de plan con módulos |
-| GET | `/api/admin/planes/:id/modulos` | Solo los módulos del plan |
-| PUT | `/api/admin/planes/:id/modulos` | Reemplazar módulos del plan |
-| GET | `/api/admin/limites/:empresaId` | Límites efectivos consolidados |
-| POST | `/api/admin/suscripcion/:empresaId/upgrade` | Upgrade de plan |
-| POST | `/api/admin/suscripcion/:empresaId/downgrade` | Downgrade de plan |
-| POST | `/api/admin/suscripcion/:empresaId/reactivar` | Reactivar suspendida/vencida |
+```text
+src/modules/admin/admin.routes.js
+  -> define rutas, validación y rate limit
 
-### 2.3 Lifecycle de suscripciones
+src/modules/admin/admin.controller.js
+  -> handlers finos
 
-Ver sección 4 para el detalle completo.
+src/modules/admin/admin.service.js
+  -> fachada del módulo admin
+  -> compone detalle SaaS de empresa, historial y estado consolidado
 
-### 2.4 Fuente de verdad operativa
-
-**El sistema nuevo es la única fuente operativa:**
-
-```
-planes  →  plan_modulos  →  suscripciones  →  empresa_modulos
+services/adminService.js
+  -> núcleo de catálogo, planes, overrides, lifecycle y onboarding
 ```
 
-Toda consulta de estado de suscripción de una empresa debe hacerse contra
-`suscripciones` (no contra `suscripciones_empresa`).
+### Adapters legacy
 
----
-
-## 3. Arquitectura final del catálogo SaaS
-
-```
-modulos (catálogo global)
-  id, nombre, descripcion, icono_clave, orden, activo
-
-planes
-  id, codigo, nombre, descripcion
-  precio_mensual, precio_anual, moneda
-  trial_dias
-  max_usuarios, max_vehiculos, max_empleados
-  es_publico, activo, orden, metadata
-
-plan_modulos  (módulos que incluye cada plan)
-  plan_id, modulo_id
-  limite_registros    ← NULL = sin límite
-  activo
-  metadata
-
-suscripciones  (una por empresa; la activa/trial es la vigente)
-  empresa_id, plan_id
-  estado: TRIAL | ACTIVA | SUSPENDIDA | VENCIDA | CANCELADA
-  fecha_inicio, fecha_fin, trial_hasta
-  ciclo: MENSUAL | ANUAL
-  precio_pactado, moneda
-  pasarela, observaciones
-
-empresa_modulos  (overrides por empresa)
-  empresa_id, modulo_id
-  activo             ← true = forzar ON, false = forzar OFF
-  limite_override    ← NULL = heredar del plan
-  notas
+```text
+routes/admin/planes-admin.js
+routes/admin/empresa-modulos.js
 ```
 
-### Resolución de estado efectivo de un módulo por empresa
+Ambos reexportan el módulo nuevo para no romper `require()` externos.
 
+## 4. Catálogo SaaS centralizado
+
+El catálogo queda centralizado en la capa de servicio, sin lógica duplicada en
+rutas ni controllers.
+
+### Responsabilidades cubiertas
+
+- listar planes
+- crear plan
+- actualizar plan
+- obtener detalle de plan
+- listar módulos por plan
+- reemplazar módulos por plan
+- listar módulos globales
+- obtener overrides por empresa
+- actualizar overrides por empresa
+- eliminar overrides
+- obtener límites efectivos por empresa
+- obtener estado SaaS consolidado por empresa
+- obtener suscripción actual e historial por empresa
+
+### Endpoints resultantes
+
+```text
+GET    /api/admin/modulos
+GET    /api/admin/planes
+POST   /api/admin/planes
+GET    /api/admin/planes/:id
+PUT    /api/admin/planes/:id
+GET    /api/admin/planes/:id/modulos
+PUT    /api/admin/planes/:id/modulos
+
+GET    /api/admin/empresas
+GET    /api/admin/empresas/:id
+GET    /api/admin/estado/:empresaId
+GET    /api/admin/limites/:empresaId
+
+GET    /api/admin/empresa-modulos/:empresaId
+PUT    /api/admin/empresa-modulos/:empresaId/:moduloId
+DELETE /api/admin/empresa-modulos/:empresaId/:moduloId
+PUT    /api/admin/empresa-modulos/:empresaId/bulk
 ```
-override.activo = TRUE  AND módulo no está en plan → 'addon'
-override.activo = FALSE                            → 'desactivado'
-módulo en plan AND (sin override OR override.activo = TRUE) → 'incluido'
-ninguna de las anteriores                          → 'no_incluido'
-```
 
-### Límites efectivos por módulo
-
-```
-limite_efectivo = limite_override ?? limite_plan ?? null (sin límite)
-```
-
----
-
-## 4. Lifecycle de suscripciones
+## 5. Lifecycle de suscripciones
 
 ### Estados válidos
 
-```
-TRIAL → ACTIVA → SUSPENDIDA → ACTIVA (reactivar)
-                            ↘ CANCELADA
-      → ACTIVA → VENCIDA   → ACTIVA (reactivar)
-                            ↘ CANCELADA
-      → CANCELADA (terminal)
-```
-
-### Transiciones y sus endpoints
-
-| Transición | Endpoint | Notas |
-|-----------|----------|-------|
-| Nueva empresa → TRIAL | `POST /api/admin/onboarding` | Usa `trial_dias` del plan |
-| TRIAL → ACTIVA | `POST /suscripcion/:id/estado` `{ estado: "ACTIVA" }` | Activación manual |
-| Cambio de plan (upgrade) | `POST /suscripcion/:id/upgrade` | Cancela la actual, crea nueva |
-| Cambio de plan (downgrade) | `POST /suscripcion/:id/downgrade` | Cancela la actual, crea nueva |
-| Cambio de plan (genérico) | `POST /suscripcion/:id` | Sin distinción semántica |
-| ACTIVA → SUSPENDIDA | `POST /suscripcion/:id/estado` `{ estado: "SUSPENDIDA" }` | Acceso bloqueado |
-| SUSPENDIDA / VENCIDA → ACTIVA | `POST /suscripcion/:id/reactivar` | Restaura acceso |
-| Cualquier → CANCELADA | `POST /suscripcion/:id/estado` `{ estado: "CANCELADA" }` | Terminal |
-| Automático → VENCIDA | Job externo (Sprint 5) | Cuando `fecha_fin < NOW()` |
-
-### Reglas de negocio
-
-1. Solo puede haber una suscripción `TRIAL` o `ACTIVA` por empresa en cualquier
-   momento. `asignarPlan` / `upgradePlan` / `downgradePlan` cancelan la anterior
-   antes de insertar la nueva.
-2. `CANCELADA` es estado terminal; no puede reactivarse. Se debe asignar un
-   nuevo plan.
-3. `reactivarSuscripcion` opera sobre la suscripción más reciente en estado
-   `SUSPENDIDA` o `VENCIDA`. No cambia el plan.
-4. El campo `trial_hasta` de la tabla `suscripciones` indica cuándo vence el
-   trial aunque el estado siga siendo `TRIAL`. Un job de Sprint 5 deberá
-   marcarla `VENCIDA` cuando `trial_hasta < NOW()` y `estado = 'TRIAL'`.
-5. `precio_pactado` prevalece sobre el precio del plan; permite acuerdos
-   comerciales individuales.
-
----
-
-## 5. Rol de tablas legacy
-
-### `suscripciones_empresa`
-
-| Atributo | Valor |
-|---------|-------|
-| Origen | Sprint 1 (sistema de licencias antiguo) |
-| Tablas relacionadas | `licencias`, `empresa_licencia`, `licencia_modulo` |
-| Estado actual | **Transicional — solo lectura recomendada** |
-| Fuente operativa | **NO.** La fuente operativa es `suscripciones` (sistema nuevo) |
-| Quién la escribe todavía | `utils/suscripciones-schema.js → upsertSuscripcionEmpresa` (llamado desde `src/modules/licencias/licencias.service.js` al asignar licencia) |
-| Endpoints que aún dependen de ella | `GET /api/suscripciones` · `GET /api/suscripciones/:id` · `POST /api/suscripciones/upsert` · `POST /api/suscripciones/:id/renovar` · `POST /api/suscripciones/:id/estado` · `POST /api/suscripciones/:id/facturas` |
-| Uso recomendado en Sprint 5 | Solo reporting histórico y auditoría |
-| Desuso planeado | Sprint 5 o 6, cuando `/api/suscripciones` sea migrado o deprecado |
-
-### `facturas_saas`
-
-| Atributo | Valor |
-|---------|-------|
-| Origen | Sprint 1 (facturación manual) |
-| Relación | Referencia `suscripciones_empresa(id)` (no la nueva `suscripciones`) |
-| Estado actual | **Transicional — registro histórico de cobros manuales** |
-| Fuente operativa | **NO.** Las nuevas facturas de Sprint 5 necesitarán una tabla separada o una migración de FK a `suscripciones` |
-| Endpoints activos | `GET /api/suscripciones/:id/facturas` · `POST /api/suscripciones/:id/facturas` |
-| Uso recomendado | Auditoría de pagos pre-Sprint 5; no emitir nuevas facturas aquí para clientes en el sistema nuevo |
-| Decisión Sprint 5 | Crear tabla `facturas` referenciando `suscripciones(id)` y migrar `facturas_saas` como tabla de historial |
-
-### Resumen de dualidad de resumen SaaS
-
-El módulo `src/modules/suscripciones/` tiene su propio `resumen()` que lee de
-`suscripciones_empresa`. El panel admin usa `getResumenSaas()` de
-`services/adminService.js` que lee de `suscripciones` (nuevo).
-
-**Decisión:** Los KPIs del panel admin (`GET /api/admin/resumen`) son
-autoritativos. `GET /api/suscripciones/resumen` es considerado legacy.
-Mientras coexistan, pueden divergir; documentarlo en el panel admin.
-
----
-
-## 6. Endpoints admin relevantes post-Sprint 4
-
-Todos requieren JWT + rol `SuperAdmin`.
-
-### Catálogo
-
-```
-GET  /api/admin/modulos
-GET  /api/admin/planes
-POST /api/admin/planes
-GET  /api/admin/planes/:id
-PUT  /api/admin/planes/:id
-GET  /api/admin/planes/:id/modulos
-PUT  /api/admin/planes/:id/modulos
+```text
+TRIAL
+ACTIVA
+SUSPENDIDA
+VENCIDA
+CANCELADA
 ```
 
-### Empresas y KPIs
+### Flujo formal
 
-```
-GET  /api/admin/empresas
-GET  /api/admin/empresas/:id
-GET  /api/admin/resumen
-GET  /api/admin/proximas-vencer?dias=30
+```text
+onboarding -> TRIAL
+TRIAL -> ACTIVA
+TRIAL -> CANCELADA
+ACTIVA -> SUSPENDIDA
+ACTIVA -> VENCIDA
+ACTIVA -> CANCELADA
+SUSPENDIDA -> ACTIVA   (reactivar)
+VENCIDA -> ACTIVA      (reactivar)
+ACTIVA/TRIAL -> nuevo plan (upgrade/downgrade/asignación genérica)
 ```
 
-### Onboarding
+### Reglas implementadas
 
-```
+1. Solo debe existir una suscripción `TRIAL` o `ACTIVA` vigente por empresa.
+2. `upgrade`, `downgrade` y asignación genérica cancelan la suscripción activa
+   anterior antes de insertar la nueva.
+3. `reactivar` actúa sobre la suscripción más reciente en estado
+   `SUSPENDIDA` o `VENCIDA`.
+4. `CANCELADA` se considera terminal desde el punto de vista operativo del
+   panel admin.
+5. El vencimiento automático queda documentado pero no automatizado aún; eso
+   pasa al Sprint 5.
+
+### Endpoints del lifecycle
+
+```text
 POST /api/admin/onboarding
-POST /api/admin/usuarios/:empresaId
-```
-
-### Suscripciones (lifecycle completo)
-
-```
 GET  /api/admin/suscripcion/:empresaId
-POST /api/admin/suscripcion/:empresaId              ← asignar plan (genérico)
+GET  /api/admin/suscripcion/:empresaId/historial
+POST /api/admin/suscripcion/:empresaId
 POST /api/admin/suscripcion/:empresaId/upgrade
 POST /api/admin/suscripcion/:empresaId/downgrade
 POST /api/admin/suscripcion/:empresaId/reactivar
 POST /api/admin/suscripcion/:empresaId/estado
 ```
 
-### Límites y módulos por empresa
+## 6. Rol de tablas legacy
 
+### `suscripciones_empresa`
+
+- estado: transicional
+- rol actual: compatibilidad y reporting del flujo legacy
+- fuente operativa oficial: no
+- endpoints que todavía la usan:
+  - `GET /api/suscripciones`
+  - `GET /api/suscripciones/:empresaId`
+  - `POST /api/suscripciones/upsert`
+  - `POST /api/suscripciones/:empresaId/renovar`
+  - `POST /api/suscripciones/:empresaId/estado`
+  - `GET /api/suscripciones/:empresaId/facturas`
+  - `POST /api/suscripciones/:empresaId/facturas`
+
+### `facturas_saas`
+
+- estado: transicional
+- rol actual: histórico/manual del sistema legacy
+- fuente operativa oficial: no
+- dependencia principal: sigue ligada a `suscripciones_empresa`
+- decisión vigente: mantenerla documentada y encapsulada hasta crear
+  facturación del sistema nuevo en Sprint 5
+
+## 7. Fuente de verdad operativa
+
+La resolución oficial para panel admin y estado SaaS es:
+
+```text
+planes
+plan_modulos
+suscripciones
+empresa_modulos
 ```
-GET    /api/admin/limites/:empresaId
-GET    /api/admin/empresa-modulos/:empresaId
-PUT    /api/admin/empresa-modulos/:empresaId/bulk
-PUT    /api/admin/empresa-modulos/:empresaId/:moduloId
+
+El endpoint consolidado por empresa expuesto en Sprint 4 usa únicamente la
+resolución SaaS del sistema nuevo.
+
+## 8. Endpoints admin relevantes al cierre del sprint
+
+### Catálogo y planes
+
+```text
+GET    /api/admin/modulos
+GET    /api/admin/planes
+POST   /api/admin/planes
+GET    /api/admin/planes/:id
+PUT    /api/admin/planes/:id
+GET    /api/admin/planes/:id/modulos
+PUT    /api/admin/planes/:id/modulos
+```
+
+### Empresas y estado SaaS
+
+```text
+GET /api/admin/empresas
+GET /api/admin/empresas/:id
+GET /api/admin/estado/:empresaId
+GET /api/admin/limites/:empresaId
+GET /api/admin/empresa-modulos/:empresaId
+```
+
+### Suscripciones y lifecycle
+
+```text
+GET  /api/admin/suscripcion/:empresaId
+GET  /api/admin/suscripcion/:empresaId/historial
+POST /api/admin/suscripcion/:empresaId
+POST /api/admin/suscripcion/:empresaId/upgrade
+POST /api/admin/suscripcion/:empresaId/downgrade
+POST /api/admin/suscripcion/:empresaId/reactivar
+POST /api/admin/suscripcion/:empresaId/estado
+```
+
+### Operación de tenant
+
+```text
+POST /api/admin/onboarding
+POST /api/admin/usuarios/:empresaId
+PUT  /api/admin/empresa-modulos/:empresaId/:moduloId
+PUT  /api/admin/empresa-modulos/:empresaId/bulk
 DELETE /api/admin/empresa-modulos/:empresaId/:moduloId
+GET  /api/admin/proximas-vencer
+GET  /api/admin/resumen
 ```
 
----
+## 9. Archivos creados o ajustados
 
-## 7. Archivos modificados / creados
+- `src/modules/admin/admin.routes.js`
+- `src/modules/admin/admin.controller.js`
+- `src/modules/admin/admin.service.js`
+- `services/adminService.js`
+- `src/app.js`
+- `routes/admin/planes-admin.js`
+- `routes/admin/empresa-modulos.js`
+- `docs/frontend-admin-saas-contract.md`
+- `docs/sprint-4-consolidacion-saas.md`
+- `docs/roadmap-saas.md`
 
-| Archivo | Cambio |
-|---------|--------|
-| `src/modules/admin/admin.controller.js` | **NUEVO** — handlers del panel admin |
-| `src/modules/admin/admin.routes.js` | **NUEVO** — rutas + validación consolidadas |
-| `services/adminService.js` | **AMPLIADO** — 7 funciones nuevas exportadas |
-| `src/lib/validation/admin.schemas.js` | **AMPLIADO** — 2 schemas nuevos |
-| `src/app.js` | **ACTUALIZADO** — monta `adminRoutes` desde módulo nuevo |
-| `routes/admin/planes-admin.js` | **CONVERTIDO** a shim de compatibilidad |
-| `routes/admin/empresa-modulos.js` | **CONVERTIDO** a shim de compatibilidad |
+## 10. Riesgos pendientes
 
----
+1. No existe job automático de expiración para marcar `VENCIDA`.
+2. `suscripciones_empresa` sigue coexistiendo mientras el flujo legacy no se retire.
+3. `facturas_saas` no cubre todavía el sistema nuevo.
+4. El resumen legacy de `/api/suscripciones/resumen` puede divergir del panel admin.
+5. No hay aún automatización de cobro ni webhook de pasarela.
 
-## 8. Riesgos pendientes
+## 11. Preparación para Sprint 5
 
-1. **Job de expiración automática ausente.** `trial_hasta` y `fecha_fin` se
-   calculan pero nadie cambia el estado a `VENCIDA` automáticamente. Requiere
-   un cron job (Sprint 5).
+El sistema queda preparado para que Sprint 5 tome esta base y construya:
 
-2. **`suscripciones_empresa` sigue escribiéndose.** Al asignar licencias desde
-   `/api/licencias`, `upsertSuscripcionEmpresa` escribe en la tabla legacy y
-   también en `empresa_licencia` y en la columna `licencia_id` de `empresas`.
-   Esto no rompe nada pero genera ruido. Sprint 5 debe deprecar el flujo de
-   licencias antiguo.
+- facturación del sistema nuevo
+- webhook de pagos
+- expiración automática
+- reactivación ligada a cobro
+- reporting comercial más confiable
 
-3. **`facturas_saas` no tiene contrapartida en el sistema nuevo.** Sprint 5
-   necesitará crear `facturas` (o migrar la FK) para cobro real.
-
-4. **Resumen SaaS dual.** `GET /api/suscripciones/resumen` y
-   `GET /api/admin/resumen` pueden divergir mientras coexistan los dos sistemas.
-
-5. **Módulo `src/modules/licencias/` sigue activo.** Usa `ensureLicenciasSchema`
-   que crea tablas en runtime. Sprint 5 debería migrar o deprecar.
-
-6. **Sin tests de integración.** Ningún test verifica las nuevas rutas. Se
-   recomienda añadir tests básicos antes de Sprint 5.
-
----
-
-## 9. Próximos pasos — Sprint 5
-
-1. **Job de expiración:** cron que marca `VENCIDA` cuando `trial_hasta < NOW()`
-   o `fecha_fin < NOW()` y el estado sigue siendo `TRIAL`/`ACTIVA`.
-2. **Tabla `facturas`** referenciando `suscripciones(id)`, con soporte para
-   pasarela (Wompi / Stripe).
-3. **Webhook de pasarela:** endpoint para recibir confirmaciones de pago y
-   actualizar estado de suscripción automáticamente.
-4. **Deprecación de `/api/licencias` y `/api/suscripciones` legacy** con un
-   período de migración documentado.
-5. **Emails transaccionales:** notificación de trial por vencer, vencimiento,
-   reactivación, upgrade/downgrade.
-6. **Dashboard de métricas expandido:** churn, LTV, distribución por plan.
+La consolidación de Sprint 4 deja lista la superficie admin y el contrato
+backend/frontend necesario para avanzar sin seguir mezclando catálogo nuevo con legacy.

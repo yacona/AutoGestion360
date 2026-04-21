@@ -1,120 +1,194 @@
 # Roadmap SaaS — AutoGestion360
 
-> Documento operativo posterior al Sprint 1
-> Última actualización: 2026-04-20
+Última actualización: 2026-04-21
 
-## Norte del proyecto
+## Norte del producto
 
-Convertir AutoGestion360 en un SaaS multiempresa operable, instalable desde cero, con control claro de planes, licencias, cobro, seguridad y despliegue.
+Convertir AutoGestion360 en un SaaS multiempresa operable, con:
 
-## Sprint 1 — Estabilización técnica del repositorio
+- control centralizado de planes, módulos y suscripciones
+- panel SuperAdmin estable y usable por frontend
+- seguridad backend suficiente para clientes reales
+- ciclo comercial trazable
+- despliegue y operación más predecibles
 
-### Objetivo
+## Estado resumido
 
-Dejar una línea base coherente sin cambiar todavía el comportamiento funcional.
+| Sprint | Estado | Resultado real |
+|---|---|---|
+| Sprint 1 | Completado | Línea base del repo, esquema consolidado y documentación inicial |
+| Sprint 2 | Completado | Resolución central de licencias y fallback legacy controlado |
+| Sprint 3 | Completado | Hardening backend, rate limiting, validación Zod y revisión tenant |
+| Sprint 4 | Completado | Panel admin SaaS consolidado, contrato frontend/backend y lifecycle formalizado |
+| Sprint 5 | Pendiente | Cobro, facturación nueva, expiración automática y operación comercial |
+| Sprint 6 | Pendiente | Observabilidad, CI/CD y despliegue |
 
-### Entregables
+---
 
-- inventario real de módulos y dependencias SQL
-- comparación backend vs `estructura.sql`
-- documentación de arquitectura actual
-- `.env.example` alineado con variables realmente usadas
-- `database/001_base_schema.sql` como esquema inicial consolidado
-- README con instalación y arranque desde cero
+## Sprint 1 — Estabilización técnica
 
-### Resultado esperado
+### Estado
+Completado.
 
-- un desarrollador nuevo puede levantar el sistema sin depender de DDL en runtime ni de adivinar qué SQL ejecutar
-- el equipo entiende qué partes son activas y cuáles son legacy
+### Resultado
 
-## Sprint 2 — Unificación de esquema y contratos
+- inventario real del backend y frontend
+- `.env.example` alineado
+- `database/001_base_schema.sql`
+- base documental para levantar el proyecto desde cero
 
-### Objetivo
+---
 
-Reducir la ambigüedad entre modelo legacy y modelo SaaS nuevo.
+## Sprint 2 — Unificación de licenciamiento
 
-### Prioridades
+### Estado
+Completado.
 
-1. declarar una sola fuente de verdad para suscripciones activas
-2. separar claramente tablas activas, tablas legacy y compatibilidades
-3. sacar del runtime el DDL restante
-4. documentar un flujo incremental de actualización para bases existentes
+### Resultado
 
-### Entregables sugeridos
+- `services/licenseService.js` como capa central
+- `middleware/licencia.js` usando SaaS como fuente principal
+- `ALLOW_LEGACY_LICENSE_FALLBACK` para compatibilidad transicional
+- `database/003_runtime_cleanup.sql` para sacar DDL del runtime principal
+- documentación operativa en `docs/sprint-2-unificacion-saas.md`
 
-- `database/002_runtime_cleanup.sql` o migraciones equivalentes
-- desactivación controlada de creadores dinámicos de tablas
-- matriz de compatibilidad entre `suscripciones_empresa` y `suscripciones`
+### Fuente de verdad resultante
 
-### Estado actual
+La autorización por módulos quedó centrada en:
 
-- `services/licenseService.js` resuelve la autorización desde una sola capa central
-- `middleware/licencia.js` usa el sistema nuevo como fuente principal
-- el fallback legacy quedó detrás de `ALLOW_LEGACY_LICENSE_FALLBACK`
-- el DDL runtime de licencias/suscripciones se movió a `database/003_runtime_cleanup.sql`
-- detalle operativo documentado en `docs/sprint-2-unificacion-saas.md`
+```text
+suscripciones
+planes
+plan_modulos
+empresa_modulos
+```
+
+El legacy permanece solo como fallback controlado.
+
+---
 
 ## Sprint 3 — Hardening de backend
 
-### Objetivo
+### Estado
+Completado.
 
-Preparar la aplicación para operar con clientes reales.
+### Resultado
 
-### Tareas
+- `helmet`
+- CORS explícito por entorno
+- límites de payload
+- rate limiting para login y mutaciones sensibles
+- validación Zod centralizada
+- revisión de scoping multiempresa
+- `.env` removido del índice git y `.env.example` actualizado
+- documentación en `docs/sprint-3-hardening-backend.md`
 
-- rate limiting en login y registro
-- headers de seguridad con `helmet`
-- validación de payloads con `zod`
-- política CORS explícita
-- revisión completa de autorización por `empresa_id`
-- estrategia para retiro de `.env` del índice y rotación de secretos
+---
 
 ## Sprint 4 — Consolidación SaaS
 
-### Objetivo
+### Estado
+Completado.
 
-Cerrar la brecha entre el modelo funcional actual y un SaaS administrable.
+### Resultado funcional
 
-### Tareas
+- panel admin SaaS consolidado en `src/modules/admin/`
+- rutas legacy `routes/admin/*` reducidas a adapters/shims
+- catálogo SaaS centralizado en una sola capa de servicio
+- endpoints de detalle de plan, módulos por plan, overrides por empresa y límites efectivos
+- lifecycle documentado e implementado para:
+  - trial
+  - activación
+  - upgrade
+  - downgrade
+  - suspensión
+  - cancelación
+  - vencimiento documental
+  - reactivación
+- endpoint de historial de suscripciones
+- endpoint de estado SaaS consolidado por empresa
+- contrato backend/frontend creado en `docs/frontend-admin-saas-contract.md`
+- documentación técnica creada en `docs/sprint-4-consolidacion-saas.md`
 
-- unificar control de acceso sobre `suscripciones + planes + plan_modulos + empresa_modulos`
-- redefinir el rol de `suscripciones_empresa` y `facturas_saas`
-- terminar migración del panel admin a `src/modules`
-- centralizar catálogo de módulos y límites por plan
-- definir flujo formal de upgrade/downgrade de plan
+### Arquitectura vigente tras Sprint 4
+
+```text
+src/modules/admin/
+  admin.routes.js
+  admin.controller.js
+  admin.service.js
+
+services/adminService.js
+  -> núcleo de catálogo SaaS y lifecycle reutilizable
+```
+
+### Fuente de verdad operativa
+
+```text
+planes -> plan_modulos -> suscripciones -> empresa_modulos
+```
+
+### Legacy definido
+
+- `suscripciones_empresa`: transicional, orientada a compatibilidad y reporting
+- `facturas_saas`: transicional, histórica, todavía asociada al flujo legacy
+
+Ambas quedan documentadas; no son la fuente de verdad oficial del panel admin.
+
+---
 
 ## Sprint 5 — Cobro y operación comercial
 
+### Estado
+Pendiente.
+
 ### Objetivo
 
-Habilitar el ciclo comercial completo del producto.
+Habilitar el ciclo comercial completo del SaaS.
 
-### Tareas
+### Alcance esperado
 
-- integrar pasarela de pago
-- webhook de confirmación de pagos
-- suspensión automática por vencimiento
-- renovación y facturación
-- panel de métricas SaaS
+- tabla de facturas del sistema nuevo referenciada a `suscripciones`
+- integración con pasarela de pago
+- webhook de confirmación
+- expiración automática de trial y suscripciones activas
+- renovación y reactivación asistidas por pagos
+- notificaciones operativas del lifecycle
+
+---
 
 ## Sprint 6 — Observabilidad y despliegue
 
+### Estado
+Pendiente.
+
 ### Objetivo
 
-Tener una base más apta para producción.
+Dejar la operación más apta para producción.
 
-### Tareas
+### Alcance esperado
 
 - logging estructurado
-- health checks reales con estado de DB
-- backups y restore documentados
+- health checks reales con DB
+- estrategia de backups y restore
 - CI mínima
-- estrategia de deploy y rollback
+- deploy y rollback documentados
 
-## Decisiones aún abiertas
+---
 
-- si `suscripciones` reemplaza formalmente a `suscripciones_empresa`
-- si se adopta una herramienta de migrations
-- si el modelo multiempresa seguirá siendo solo por `empresa_id`
-- cuál pasarela será la principal
-- cómo versionar seeds y catálogos SaaS
+## Riesgos abiertos al cierre de Sprint 4
+
+1. `suscripciones_empresa` y `facturas_saas` siguen activas para compatibilidad.
+2. No existe todavía job automático para marcar `VENCIDA`.
+3. No existe todavía facturación nativa del sistema nuevo.
+4. El módulo legacy de licencias sigue coexistiendo mientras se completa la migración.
+
+## Criterio de entrada para Sprint 5
+
+Antes de arrancar Sprint 5, el equipo ya cuenta con:
+
+- panel admin SaaS integrado en `src/app.js`
+- contrato frontend/backend usable
+- lifecycle formalizado
+- catálogo centralizado
+- definición explícita del rol de tablas legacy

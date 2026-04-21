@@ -1,13 +1,18 @@
 'use strict';
 
 /**
- * adminService.js — Lógica de negocio del panel SuperAdmin
+ * adminService.js — Núcleo de negocio del catálogo SaaS
  *
  * Trabaja exclusivamente con el sistema nuevo:
  *   planes  →  plan_modulos  →  suscripciones  →  empresa_modulos
  *
  * Todas las funciones reciben un `queryable` opcional (pool o client de pg)
  * para poder participar en transacciones externas.
+ *
+ * El módulo HTTP de admin vive en:
+ *   src/modules/admin/admin.routes.js
+ *   src/modules/admin/admin.controller.js
+ *   src/modules/admin/admin.service.js
  */
 
 const bcrypt = require('bcryptjs');
