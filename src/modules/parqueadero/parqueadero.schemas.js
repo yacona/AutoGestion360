@@ -5,6 +5,11 @@ const booleanFromString = z.union([
   z.string().transform((v) => v === 'true'),
 ]);
 
+const optionalText = z.preprocess(
+  (value) => (value == null ? '' : value),
+  z.string()
+);
+
 const entradaSchema = z.object({
   placa: z.string().min(1, 'La placa es obligatoria'),
   tipo_vehiculo: z.string().min(1, 'El tipo de vehículo es obligatorio'),
@@ -23,9 +28,9 @@ const entradaSchema = z.object({
 
 const salidaSchema = z.object({
   metodo_pago: z.string().optional(),
-  detalle_pago: z.string().default(''),
-  observaciones: z.string().default(''),
-  referencia_transaccion: z.string().default(''),
+  detalle_pago: optionalText,
+  observaciones: optionalText,
+  referencia_transaccion: optionalText,
   monto_pago: z.coerce.number().optional().nullable(),
 });
 

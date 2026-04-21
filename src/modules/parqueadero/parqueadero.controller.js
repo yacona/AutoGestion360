@@ -27,7 +27,13 @@ const upload = multer({
 function parseZod(schema, data, next) {
   const result = schema.safeParse(data);
   if (!result.success) {
-    next(new ValidationError(result.error.errors.map((e) => e.message).join('; ')));
+    const issues = Array.isArray(result.error?.issues)
+      ? result.error.issues
+      : Array.isArray(result.error?.errors)
+        ? result.error.errors
+        : [];
+    const message = issues.map((issue) => issue?.message).filter(Boolean).join('; ') || 'Datos inválidos.';
+    next(new ValidationError(message));
     return null;
   }
   return result.data;

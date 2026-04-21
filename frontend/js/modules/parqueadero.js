@@ -509,9 +509,9 @@ async function confirmarSalida() {
     return;
   }
 
-  const referencia = document.getElementById("pq-referencia").value.trim() || null;
-  const detallePago = document.getElementById("pq-detalle-pago").value.trim() || null;
-  const observacionesSalida = document.getElementById("pq-obs-salida").value.trim() || null;
+  const referencia = document.getElementById("pq-referencia").value.trim();
+  const detallePago = document.getElementById("pq-detalle-pago").value.trim();
+  const observacionesSalida = document.getElementById("pq-obs-salida").value.trim();
 
   try {
     const payload = { referencia_transaccion: referencia, detalle_pago: detallePago, observaciones: observacionesSalida };

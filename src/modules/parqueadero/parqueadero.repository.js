@@ -230,8 +230,8 @@ async function closeEntry(qbl, id, data) {
   const { rows } = await qbl.query(
     `UPDATE parqueadero
      SET hora_salida=$1, minutos_total=$2, valor_total=$3, estado_pago=$4,
-         metodo_pago=$5, detalle_pago=$6,
-         observaciones=CASE WHEN $7 IS NULL THEN observaciones ELSE COALESCE(observaciones||E'\n','') || $7 END
+         metodo_pago=$5, detalle_pago=$6::text,
+         observaciones=CASE WHEN $7::text IS NULL THEN observaciones ELSE COALESCE(observaciones||E'\n','') || $7::text END
      WHERE id=$8 RETURNING *`,
     [data.hora_salida, data.minutos_total, data.valor_total, data.estado_pago,
      data.metodo_pago, data.detalle_pago, data.observaciones || null, id]
