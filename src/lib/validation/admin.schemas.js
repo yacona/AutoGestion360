@@ -123,6 +123,15 @@ const proximasVencerQuerySchema = z.object({
   dias: optionalPositiveIntFromUnknown,
 });
 
+const reactivarBodySchema = z.object({
+  fecha_fin:     nullableDateString.optional(),
+  observaciones: nullableTrimmedString.optional(),
+});
+
+const setPlanModulosBodySchema = z.object({
+  modulos: z.array(moduloPlanSchema).min(0, 'modulos debe ser un array (puede estar vacío para limpiar todos).'),
+});
+
 module.exports = {
   assignPlanBodySchema,
   changeSubscriptionStateBodySchema,
@@ -135,5 +144,7 @@ module.exports = {
   moduloOverrideBulkBodySchema,
   onboardingBodySchema,
   proximasVencerQuerySchema,
+  reactivarBodySchema,
+  setPlanModulosBodySchema,
   updatePlanBodySchema,
 };

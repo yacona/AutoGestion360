@@ -658,20 +658,201 @@ async function crearAdminTenant(empresaId, { nombre, email, password, rol = 'Adm
   return rows[0];
 }
 
+// ─────────────────────────────────────────────────────────────
+// PLANES — lectura detallada y gestión de módulos por plan
+// ─────────────────────────────────────────────────────────────
+
+/** Devuelve un plan con sus módulos asociados. */
+async function getPlanConModulos(planId, queryable = db) {
+  await assertGlobalRecord(queryable, 'planes', planId, 'Plan no encontrado.');
+  const { rows: planRows } = await queryable.query(
+    'SELECT * FROM planes WHERE id = $1 LIMIT 1', [planId]
+  );
+  const { rows: modulos } = await queryable.query(`
+    SELECT
+      m.id, m.nombre, m.descripcion, m.icono_clave, m.orden,
+      pm.limite_registros, pm.activo, pm.metadata
+    FROM plan_modulos pm
+    JOIN modulos m ON m.id = pm.modulo_id
+    WHERE pm.plan_id = $1 AND m.activo = TRUE
+    ORDER BY m.orden NULLS LAST, m.nombre
+  `, [planId]);
+  return { ...planRows[0], modulos };
+}
+
+/** Lista todos los módulos del catálogo global. */
+async function getModulosDisponibles(queryable = db) {
+  const { rows } = await queryable.query(`
+    SELECT id, nombre, descripcion, icono_clave, orden, activo
+    FROM modulos
+    WHERE activo = TRUE
+    ORDER BY orden NULLS LAST, nombre
+  `);
+  return rows;
+}
+
+/**
+ * Reemplaza los módulos de un plan.
+ * Recibe array de { modulo_id, limite_registros?, activo?, metadata? }.
+ */
+async function setPlanModulos(planId, modulos, queryable = db) {
+  await assertGlobalRecord(queryable, 'planes', planId, 'Plan no encontrado.');
+
+  const isExternalClient = queryable !== db && typeof queryable.query === 'function' && !queryable.connect;
+  const client = isExternalClient ? queryable : await db.connect();
+
+  try {
+    if (!isExternalClient) await client.query('BEGIN');
+    await syncPlanModulos(client, planId, modulos);
+    if (!isExternalClient) await client.query('COMMIT');
+
+    const { rows } = await queryable.query(`
+      SELECT
+        m.id, m.nombre, m.descripcion, m.icono_clave, m.orden,
+        pm.limite_registros, pm.activo, pm.metadata
+      FROM plan_modulos pm
+      JOIN modulos m ON m.id = pm.modulo_id
+      WHERE pm.plan_id = $1 AND m.activo = TRUE
+      ORDER BY m.orden NULLS LAST, m.nombre
+    `, [planId]);
+    return rows;
+  } catch (err) {
+    if (!isExternalClient) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (!isExternalClient) client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// LÍMITES EFECTIVOS — plan + overrides consolidados
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Calcula los límites efectivos de una empresa combinando:
+ *   - Límites globales del plan (max_usuarios, max_vehiculos, max_empleados)
+ *   - Límites por módulo del plan (plan_modulos.limite_registros)
+ *   - Overrides por empresa (empresa_modulos.limite_override)
+ */
+async function getLimitesEfectivos(empresaId, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
+
+  const { rows: planRows } = await queryable.query(`
+    SELECT
+      p.id AS plan_id, p.codigo AS plan_codigo, p.nombre AS plan_nombre,
+      p.max_usuarios, p.max_vehiculos, p.max_empleados,
+      s.estado AS suscripcion_estado, s.fecha_fin, s.trial_hasta
+    FROM suscripciones s
+    JOIN planes p ON p.id = s.plan_id
+    WHERE s.empresa_id = $1 AND s.estado IN ('TRIAL','ACTIVA')
+    LIMIT 1
+  `, [empresaId]);
+
+  const plan = planRows[0] || null;
+  const modulos = await getModulosParaEmpresa(empresaId, queryable);
+
+  return {
+    plan,
+    limites_globales: {
+      max_usuarios:  plan?.max_usuarios  ?? null,
+      max_vehiculos: plan?.max_vehiculos ?? null,
+      max_empleados: plan?.max_empleados ?? null,
+    },
+    modulos: modulos.map((m) => ({
+      id:              m.id,
+      nombre:          m.nombre,
+      estado_efectivo: m.estado_efectivo,
+      limite_plan:     m.limite_plan,
+      limite_override: m.limite_override,
+      limite_efectivo: m.limite_override !== null ? m.limite_override : m.limite_plan,
+    })),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// LIFECYCLE — upgrade, downgrade, reactivación
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Upgrade de plan: cancela la suscripción actual e inicia una nueva con
+ * un plan superior. Funcionalmente igual a asignarPlan; el prefijo
+ * "upgrade" registra la intención en observaciones.
+ */
+async function upgradePlan(empresaId, planId, opts = {}, queryable = db) {
+  return asignarPlan(empresaId, planId, {
+    ...opts,
+    observaciones: opts.observaciones || 'Upgrade de plan',
+  }, queryable);
+}
+
+/**
+ * Downgrade de plan: igual que upgradePlan pero marca la intención
+ * de bajar de plan.
+ */
+async function downgradePlan(empresaId, planId, opts = {}, queryable = db) {
+  return asignarPlan(empresaId, planId, {
+    ...opts,
+    observaciones: opts.observaciones || 'Downgrade de plan',
+  }, queryable);
+}
+
+/**
+ * Reactiva la suscripción más reciente que esté SUSPENDIDA o VENCIDA.
+ * No cambia el plan; solo restaura el estado a ACTIVA.
+ *
+ * @param {number} empresaId
+ * @param {{ fechaFin?: string|null, observaciones?: string }} [opts]
+ */
+async function reactivarSuscripcion(empresaId, opts = {}, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
+
+  const { rows } = await queryable.query(`
+    UPDATE suscripciones
+    SET estado = 'ACTIVA',
+        fecha_fin = COALESCE($2::timestamptz, fecha_fin),
+        observaciones = COALESCE($3, observaciones),
+        actualizado_en = NOW()
+    WHERE id = (
+      SELECT id FROM suscripciones
+      WHERE empresa_id = $1 AND estado IN ('SUSPENDIDA','VENCIDA')
+      ORDER BY id DESC
+      LIMIT 1
+    )
+    RETURNING *
+  `, [empresaId, opts.fechaFin || null, opts.observaciones || 'Reactivación manual']);
+
+  if (rows.length === 0) {
+    throw Object.assign(
+      new Error('No hay suscripción suspendida o vencida para reactivar.'),
+      { statusCode: 404 }
+    );
+  }
+  return rows[0];
+}
+
 module.exports = {
   // Empresas
   listarEmpresas,
   getEmpresaCompleta,
   onboardEmpresa,
-  // Planes y suscripciones
+  // Planes — catálogo y módulos
   listarPlanes,
   crearPlan,
   actualizarPlan,
+  getPlanConModulos,
+  getModulosDisponibles,
+  setPlanModulos,
+  // Suscripciones — lifecycle
   asignarPlan,
+  upgradePlan,
+  downgradePlan,
+  reactivarSuscripcion,
   cambiarEstadoSuscripcion,
   getProximasAVencer,
   getResumenSaas,
-  // Módulos por empresa
+  // Límites efectivos
+  getLimitesEfectivos,
+  // Módulos por empresa (overrides)
   getModulosParaEmpresa,
   upsertModuloOverride,
   removeModuloOverride,

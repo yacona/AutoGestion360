@@ -1,0 +1,289 @@
+'use strict';
+
+/**
+ * admin.controller.js
+ *
+ * Capa fina sobre services/adminService.js para el panel SuperAdmin.
+ * Todos los handlers asumen que el middleware SuperAdmin ya validó el rol
+ * (ver admin.routes.js).
+ */
+
+const svc = require('../../../services/adminService');
+const db  = require('../../../db');
+const { isSuperAdmin } = require('../../lib/helpers');
+
+// ─── helpers ────────────────────────────────────────────────
+
+const wrap = (fn) => async (req, res, next) => {
+  try {
+    await fn(req, res);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Dato duplicado.' });
+    }
+    next(err);
+  }
+};
+
+function requireSuperAdmin(req, res, next) {
+  if (!isSuperAdmin(req.user)) {
+    return res.status(403).json({ error: 'Acceso denegado. Solo SuperAdmin.' });
+  }
+  next();
+}
+
+// ─── PLANES ─────────────────────────────────────────────────
+
+const listarPlanes = wrap(async (req, res) => {
+  res.json(await svc.listarPlanes());
+});
+
+const getPlan = wrap(async (req, res) => {
+  const plan = await svc.getPlanConModulos(Number(req.params.id));
+  res.json(plan);
+});
+
+const crearPlan = wrap(async (req, res) => {
+  const plan = await svc.crearPlan(req.body);
+  res.status(201).json({ mensaje: 'Plan creado.', plan });
+});
+
+const actualizarPlan = wrap(async (req, res) => {
+  const plan = await svc.actualizarPlan(Number(req.params.id), req.body);
+  res.json({ mensaje: 'Plan actualizado.', plan });
+});
+
+// ─── MÓDULOS DEL CATÁLOGO Y POR PLAN ────────────────────────
+
+const listarModulos = wrap(async (req, res) => {
+  res.json(await svc.getModulosDisponibles());
+});
+
+const getModulosPlan = wrap(async (req, res) => {
+  const plan = await svc.getPlanConModulos(Number(req.params.id));
+  res.json(plan.modulos);
+});
+
+const setModulosPlan = wrap(async (req, res) => {
+  const modulos = await svc.setPlanModulos(Number(req.params.id), req.body.modulos);
+  res.json({ mensaje: 'Módulos del plan actualizados.', modulos });
+});
+
+// ─── EMPRESAS ────────────────────────────────────────────────
+
+const listarEmpresas = wrap(async (req, res) => {
+  res.json(await svc.listarEmpresas());
+});
+
+const getEmpresa = wrap(async (req, res) => {
+  const empresaId = Number(req.params.id);
+  const [empresa, modulos] = await Promise.all([
+    svc.getEmpresaCompleta(empresaId),
+    svc.getModulosParaEmpresa(empresaId),
+  ]);
+  if (!empresa) return res.status(404).json({ error: 'Empresa no encontrada.' });
+  res.json({ ...empresa, modulos });
+});
+
+// ─── KPIs SaaS ───────────────────────────────────────────────
+
+const getResumen = wrap(async (req, res) => {
+  res.json(await svc.getResumenSaas());
+});
+
+const getProximasVencer = wrap(async (req, res) => {
+  const dias = Number(req.query.dias) || 30;
+  res.json(await svc.getProximasAVencer(dias));
+});
+
+// ─── ONBOARDING ──────────────────────────────────────────────
+
+const onboarding = wrap(async (req, res) => {
+  const result = await svc.onboardEmpresa(req.body);
+  res.status(201).json({
+    mensaje: 'Empresa creada con éxito.',
+    empresa: result.empresa,
+    plan:    result.plan,
+  });
+});
+
+// ─── SUSCRIPCIÓN ─────────────────────────────────────────────
+
+const getSuscripcion = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const { rows } = await db.query(`
+    SELECT s.*, p.codigo AS plan_codigo, p.nombre AS plan_nombre,
+           p.precio_mensual, p.precio_anual,
+           p.max_usuarios, p.max_vehiculos, p.max_empleados
+    FROM suscripciones s
+    JOIN planes p ON p.id = s.plan_id
+    WHERE s.empresa_id = $1 AND s.estado IN ('TRIAL','ACTIVA')
+    LIMIT 1
+  `, [empresaId]);
+  if (rows.length === 0) {
+    return res.json({ suscripcion: null, mensaje: 'Sin suscripción activa.' });
+  }
+  res.json(rows[0]);
+});
+
+const asignarPlan = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const { plan_id, ...opts } = req.body;
+  const suscripcion = await svc.asignarPlan(empresaId, Number(plan_id), {
+    ciclo:         opts.ciclo,
+    precioPactado: opts.precio_pactado !== undefined ? Number(opts.precio_pactado) : null,
+    moneda:        opts.moneda,
+    fechaFin:      opts.fecha_fin || null,
+    estado:        opts.estado || 'ACTIVA',
+    observaciones: opts.observaciones || null,
+    pasarela:      opts.pasarela || 'MANUAL',
+  });
+  res.json({ mensaje: 'Plan asignado.', suscripcion });
+});
+
+const upgradePlan = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const { plan_id, ...opts } = req.body;
+  const suscripcion = await svc.upgradePlan(empresaId, Number(plan_id), {
+    ciclo:         opts.ciclo,
+    precioPactado: opts.precio_pactado !== undefined ? Number(opts.precio_pactado) : null,
+    moneda:        opts.moneda,
+    fechaFin:      opts.fecha_fin || null,
+    observaciones: opts.observaciones || null,
+    pasarela:      opts.pasarela || 'MANUAL',
+  });
+  res.json({ mensaje: 'Upgrade aplicado.', suscripcion });
+});
+
+const downgradePlan = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const { plan_id, ...opts } = req.body;
+  const suscripcion = await svc.downgradePlan(empresaId, Number(plan_id), {
+    ciclo:         opts.ciclo,
+    precioPactado: opts.precio_pactado !== undefined ? Number(opts.precio_pactado) : null,
+    moneda:        opts.moneda,
+    fechaFin:      opts.fecha_fin || null,
+    observaciones: opts.observaciones || null,
+    pasarela:      opts.pasarela || 'MANUAL',
+  });
+  res.json({ mensaje: 'Downgrade aplicado.', suscripcion });
+});
+
+const reactivarSuscripcion = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const suscripcion = await svc.reactivarSuscripcion(empresaId, {
+    fechaFin:      req.body.fecha_fin || null,
+    observaciones: req.body.observaciones || null,
+  });
+  res.json({ mensaje: 'Suscripción reactivada.', suscripcion });
+});
+
+const cambiarEstadoSuscripcion = wrap(async (req, res) => {
+  const empresaId  = Number(req.params.empresaId);
+  const { estado } = req.body;
+  const suscripcion = await svc.cambiarEstadoSuscripcion(empresaId, String(estado).toUpperCase());
+  res.json({ mensaje: `Suscripción actualizada a ${estado}.`, suscripcion });
+});
+
+// ─── LÍMITES EFECTIVOS ───────────────────────────────────────
+
+const getLimites = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  res.json(await svc.getLimitesEfectivos(empresaId));
+});
+
+// ─── EMPRESA_MODULOS (overrides) ─────────────────────────────
+
+const getEmpresaModulos = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  res.json(await svc.getModulosParaEmpresa(empresaId));
+});
+
+const upsertOverride = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const moduloId  = Number(req.params.moduloId);
+  const override  = await svc.upsertModuloOverride(empresaId, moduloId, {
+    activo:        req.body.activo !== false,
+    limiteOverride: req.body.limite_override ?? null,
+    notas:          req.body.notas ?? null,
+  });
+  res.json({ mensaje: 'Override guardado.', override });
+});
+
+const deleteOverride = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const moduloId  = Number(req.params.moduloId);
+  const eliminado = await svc.removeModuloOverride(empresaId, moduloId);
+  if (!eliminado) return res.status(404).json({ error: 'Override no encontrado.' });
+  res.json({ mensaje: 'Override eliminado. El módulo sigue el comportamiento del plan.' });
+});
+
+const bulkOverrides = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const overrides = req.body.overrides;
+  const results = [];
+
+  for (const item of overrides) {
+    const moduloId = Number(item.modulo_id);
+    if (!moduloId) continue;
+
+    if (item.eliminar) {
+      await svc.removeModuloOverride(empresaId, moduloId);
+      results.push({ modulo_id: moduloId, accion: 'eliminado' });
+    } else {
+      const saved = await svc.upsertModuloOverride(empresaId, moduloId, {
+        activo:         item.activo !== false,
+        limiteOverride: item.limite_override ?? null,
+        notas:          item.notas ?? null,
+      });
+      results.push({ modulo_id: moduloId, accion: 'guardado', override: saved });
+    }
+  }
+
+  res.json({ mensaje: `${results.length} overrides procesados.`, results });
+});
+
+// ─── USUARIOS DE TENANT ──────────────────────────────────────
+
+const crearAdminTenant = wrap(async (req, res) => {
+  const empresaId = Number(req.params.empresaId);
+  const usuario   = await svc.crearAdminTenant(empresaId, req.body);
+  res.status(201).json({ mensaje: 'Usuario creado.', usuario });
+});
+
+module.exports = {
+  requireSuperAdmin,
+  // Planes
+  listarPlanes,
+  getPlan,
+  crearPlan,
+  actualizarPlan,
+  // Módulos
+  listarModulos,
+  getModulosPlan,
+  setModulosPlan,
+  // Empresas
+  listarEmpresas,
+  getEmpresa,
+  // KPIs
+  getResumen,
+  getProximasVencer,
+  // Onboarding
+  onboarding,
+  // Suscripciones
+  getSuscripcion,
+  asignarPlan,
+  upgradePlan,
+  downgradePlan,
+  reactivarSuscripcion,
+  cambiarEstadoSuscripcion,
+  // Límites
+  getLimites,
+  // Overrides
+  getEmpresaModulos,
+  upsertOverride,
+  deleteOverride,
+  bulkOverrides,
+  // Usuarios
+  crearAdminTenant,
+};

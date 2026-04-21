@@ -35,9 +35,8 @@ const suscripcionesRoutes      = require('./modules/suscripciones/suscripciones.
 // ── Módulo legacy sin migrar ──────────────────────────────────────────────────
 const reportesRoutes = require('../routes/reportes');
 
-// ── Panel SuperAdmin (sistema nuevo planes/suscripciones) ────────────────────
-const adminPlanesRoutes      = require('../routes/admin/planes-admin');
-const adminEmpresaModRoutes  = require('../routes/admin/empresa-modulos');
+// ── Panel SuperAdmin — módulo consolidado (Sprint 4) ─────────────────────────
+const adminRoutes = require('./modules/admin/admin.routes');
 
 const app = express();
 const corsOptions = buildCorsOptions();
@@ -91,10 +90,9 @@ app.use('/api/usuarios', authMiddleware, licenseMiddleware('usuarios'), usuarios
 app.use('/api/licencias', authMiddleware, licenciasRoutes);
 app.use('/api/suscripciones', authMiddleware, suscripcionesRoutes);
 
-// ── Panel SuperAdmin — nuevas rutas (sistema planes/suscripciones 002) ───────
-// authMiddleware ya verifica el JWT; el guard SuperAdmin está dentro de cada router.
-app.use('/api/admin',                  authMiddleware, adminPlanesRoutes);
-app.use('/api/admin/empresa-modulos',  authMiddleware, adminEmpresaModRoutes);
+// ── Panel SuperAdmin — módulo consolidado Sprint 4 ────────────────────────────
+// authMiddleware verifica el JWT; el guard SuperAdmin vive en admin.controller.js
+app.use('/api/admin', authMiddleware, adminRoutes);
 
 // Ruta de perfil (debug)
 app.get('/api/perfil', authMiddleware, (req, res) => res.json({ mensaje: 'Acceso autorizado', usuario_actual: req.user }));
