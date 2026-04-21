@@ -1,22 +1,21 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const repo = require('./auth.repository');
-const db = require('../../../db');
-const { ensureLicenciasSchema } = require('../../../utils/licencias-schema');
-const { getSuscripcionEmpresa } = require('../../../utils/suscripciones-schema');
+const { getLicenseStatus, isLegacyFallbackEnabled } = require('../../../services/licenseService');
 const { ValidationError, UnauthorizedError, ForbiddenError, NotFoundError } = require('../../utils/errors');
-const { normalizeText } = require('../../utils/normalizers');
 
-const LEGACY_LICENSE_MODULES = {
-  demo:    ['dashboard', 'parqueadero', 'clientes'],
-  basica:  ['dashboard', 'parqueadero', 'clientes', 'reportes', 'configuracion'],
-  pro:     ['dashboard', 'parqueadero', 'clientes', 'reportes', 'lavadero', 'taller', 'empleados', 'usuarios', 'configuracion'],
-  premium: ['dashboard', 'parqueadero', 'clientes', 'reportes', 'lavadero', 'taller', 'empleados', 'usuarios', 'configuracion', 'empresas'],
-};
-
-function isExpired(dateValue) {
-  return Boolean(dateValue && new Date(dateValue) < new Date());
-}
+const SUPERADMIN_MODULES = [
+  'dashboard',
+  'parqueadero',
+  'lavadero',
+  'taller',
+  'clientes',
+  'empleados',
+  'reportes',
+  'configuracion',
+  'usuarios',
+  'empresas',
+];
 
 function buildToken(usuario) {
   return jwt.sign(
@@ -26,28 +25,74 @@ function buildToken(usuario) {
   );
 }
 
-function buildPermisos(licencia, modulos, bloqueada, suscripcion) {
+function normalizeRole(role) {
+  return String(role || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+function buildSuperAdminPermisos() {
   return {
     licencia: {
-      id: licencia.licencia_id,
-      nombre: licencia.licencia_nombre,
-      descripcion: licencia.descripcion,
-      precio: licencia.precio,
-      fecha_inicio: licencia.fecha_inicio,
-      fecha_fin: licencia.fecha_fin,
-      activa: licencia.activa && !bloqueada,
+      id: 'superadmin',
+      codigo: 'superadmin',
+      nombre: 'SuperAdmin',
+      descripcion: 'Acceso total por rol de sistema',
+      precio: null,
+      fecha_inicio: null,
+      fecha_fin: null,
+      activa: true,
+      fuente: 'rol',
+      oficial: true,
+      transicional: false,
     },
-    suscripcion,
+    suscripcion: null,
+    expirada: false,
+    estado: 'ACTIVA',
+    fuente: 'rol',
+    legacy_fallback_enabled: false,
+    legacy_fallback_used: false,
+    modulos: [...SUPERADMIN_MODULES],
+    modulos_detalle: SUPERADMIN_MODULES.map((nombre) => ({ nombre, descripcion: null, icono_clave: null, limite: null, es_addon: false })),
+  };
+}
+
+function buildPermisos(status) {
+  const licencia = status.licencia || {};
+  const bloqueada = !status.vigente;
+
+  return {
+    licencia: {
+      id: licencia.id ?? null,
+      codigo: licencia.codigo ?? null,
+      nombre: licencia.nombre ?? null,
+      descripcion: licencia.descripcion ?? null,
+      precio: licencia.precio ?? status.suscripcion?.precio_pactado ?? null,
+      fecha_inicio: licencia.fecha_inicio ?? status.suscripcion?.fecha_inicio ?? null,
+      fecha_fin: licencia.fecha_fin ?? status.suscripcion?.fecha_fin ?? status.suscripcion?.trial_hasta ?? null,
+      activa: Boolean(licencia.activa) && !bloqueada,
+      fuente: status.fuente,
+      oficial: status.oficial === true,
+      transicional: status.transicional === true,
+    },
+    suscripcion: status.suscripcion
+      ? { ...status.suscripcion, estado_real: status.estado, fuente: 'suscripciones' }
+      : null,
     expirada: bloqueada,
-    modulos: bloqueada ? [] : modulos.map((m) => m.nombre),
-    modulos_detalle: bloqueada ? [] : modulos,
+    estado: status.estado,
+    fuente: status.fuente,
+    legacy_fallback_enabled: status.metadata?.legacy_fallback_enabled === true,
+    legacy_fallback_used: status.metadata?.legacy_fallback_used === true,
+    modulos: bloqueada ? [] : status.modulos,
+    modulos_detalle: bloqueada ? [] : status.modulos_detalle,
   };
 }
 
 async function login(email, password) {
   if (!email || !password) throw new ValidationError('Debe enviar email y contraseña.');
 
-  await ensureLicenciasSchema();
   const user = await repo.findUserWithEmpresa(email);
 
   if (!user) throw new UnauthorizedError('Credenciales inválidas.');
@@ -72,61 +117,37 @@ async function login(email, password) {
   };
 }
 
-async function getEmpresaLicenciaPermisos(empresaId) {
-  await ensureLicenciasSchema();
-  const suscripcion = await getSuscripcionEmpresa(db, empresaId).catch(() => null);
-  const suscripcionBloqueada = suscripcion
-    ? ['VENCIDA', 'SUSPENDIDA', 'CANCELADA'].includes(suscripcion.estado_real)
-    : false;
-
-  const licenciaActiva = await repo.findEmpresaLicenciaActiva(empresaId);
-  if (licenciaActiva) {
-    const expirada = isExpired(licenciaActiva.fecha_fin);
-    const modulos = await repo.findModulosByLicenciaId(licenciaActiva.licencia_id);
-    return buildPermisos(licenciaActiva, modulos, expirada || suscripcionBloqueada, suscripcion);
+async function getEmpresaLicenciaPermisos(empresaId, user = null) {
+  if (normalizeRole(user?.rol) === 'superadmin') {
+    return buildSuperAdminPermisos();
   }
 
-  const licenciaDirecta = await repo.findEmpresaLicenciaDirecta(empresaId);
-  if (licenciaDirecta) {
-    const expirada = isExpired(licenciaDirecta.fecha_fin);
-    const modulos = await repo.findModulosByLicenciaId(licenciaDirecta.licencia_id);
-    return buildPermisos(licenciaDirecta, modulos, expirada || suscripcionBloqueada, suscripcion);
-  }
-
-  const empresaLegacy = await repo.findEmpresaLegacy(empresaId);
-  if (!empresaLegacy) {
-    return { licencia: null, suscripcion, expirada: suscripcionBloqueada, modulos: [], modulos_detalle: [] };
-  }
-
-  const licenciaKey = normalizeText(empresaLegacy.licencia_tipo || 'demo');
-  const expirada = isExpired(empresaLegacy.licencia_fin);
-  const modulos = expirada ? [] : (LEGACY_LICENSE_MODULES[licenciaKey] || LEGACY_LICENSE_MODULES.demo);
-
-  return {
-    licencia: {
-      id: null,
-      nombre: empresaLegacy.licencia_tipo || 'Demo',
-      descripcion: 'Licencia heredada de empresa',
-      precio: null,
-      fecha_inicio: empresaLegacy.licencia_inicio,
-      fecha_fin: empresaLegacy.licencia_fin,
-      activa: empresaLegacy.activa && !expirada,
-    },
-    suscripcion,
-    expirada: expirada || suscripcionBloqueada,
-    modulos: expirada || suscripcionBloqueada ? [] : modulos,
-    modulos_detalle: expirada || suscripcionBloqueada ? [] : modulos.map((nombre) => ({ nombre, descripcion: '' })),
-  };
+  const status = await getLicenseStatus(empresaId, {
+    allowLegacyFallback: isLegacyFallbackEnabled(),
+  });
+  return buildPermisos(status);
 }
 
 async function getEmpresaLicencia(empresaId) {
-  await ensureLicenciasSchema();
-  let licencia = await repo.findEmpresaLicenciaActiva(empresaId);
-  if (!licencia) licencia = await repo.findEmpresaLicenciaDirecta(empresaId);
-  if (!licencia) return { mensaje: 'No hay licencia asignada' };
+  const status = await getLicenseStatus(empresaId, {
+    allowLegacyFallback: isLegacyFallbackEnabled(),
+  });
 
-  const modulos = await repo.findModulosByLicenciaId(licencia.licencia_id);
-  return { ...licencia, modulos };
+  if (!status.fuente || !status.licencia) {
+    return { mensaje: 'No hay licencia asignada' };
+  }
+
+  return {
+    ...status.licencia,
+    estado: status.estado,
+    vigente: status.vigente,
+    fuente: status.fuente,
+    oficial: status.oficial === true,
+    transicional: status.transicional === true,
+    modulos: status.modulos_detalle,
+    plan: status.plan,
+    suscripcion: status.suscripcion,
+  };
 }
 
 async function getEmpresa(empresaId) {

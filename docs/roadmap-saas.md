@@ -46,6 +46,14 @@ Reducir la ambigüedad entre modelo legacy y modelo SaaS nuevo.
 - desactivación controlada de creadores dinámicos de tablas
 - matriz de compatibilidad entre `suscripciones_empresa` y `suscripciones`
 
+### Estado actual
+
+- `services/licenseService.js` resuelve la autorización desde una sola capa central
+- `middleware/licencia.js` usa el sistema nuevo como fuente principal
+- el fallback legacy quedó detrás de `ALLOW_LEGACY_LICENSE_FALLBACK`
+- el DDL runtime de licencias/suscripciones se movió a `database/003_runtime_cleanup.sql`
+- detalle operativo documentado en `docs/sprint-2-unificacion-saas.md`
+
 ## Sprint 3 — Hardening de backend
 
 ### Objetivo

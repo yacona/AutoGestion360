@@ -2852,6 +2852,10 @@ body.theme-light .theme-option.active {
   margin-top: 0.3rem;
 }
 
+.small-text--top-spacing {
+  padding-top: 1.8rem;
+}
+
 .form-section {
   margin-bottom: 1.5rem;
   padding-bottom: 1rem;

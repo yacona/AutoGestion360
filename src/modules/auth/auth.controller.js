@@ -80,7 +80,7 @@ async function getEmpresaLicencia(req, res, next) {
 
 async function getLicenciaPermisos(req, res, next) {
   try {
-    res.json(await service.getEmpresaLicenciaPermisos(req.user.empresa_id));
+    res.json(await service.getEmpresaLicenciaPermisos(req.user.empresa_id, req.user));
   } catch (err) { next(err); }
 }
 

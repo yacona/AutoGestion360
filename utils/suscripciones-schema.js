@@ -1,11 +1,30 @@
 const db = require("../db");
 const { ensureLicenciasSchema } = require("./licencias-schema");
 
+// Compatibilidad transicional: este helper ya no crea tablas en runtime.
+// Si la estructura legacy de suscripciones no existe, debe aplicarse
+// database/003_runtime_cleanup.sql.
+
 const ESTADOS_SUSCRIPCION = ["TRIAL", "ACTIVA", "VENCIDA", "SUSPENDIDA", "CANCELADA"];
 const ESTADOS_FACTURA_SAAS = ["PENDIENTE", "PAGADA", "VENCIDA", "ANULADA"];
 const PASARELAS_SAAS = ["MANUAL", "STRIPE", "WOMPI", "MERCADOPAGO", "PAYU", "OTRO"];
 
 let schemaReady = false;
+
+const REQUIRED_TABLES = [
+  "suscripciones_empresa",
+  "facturas_saas",
+];
+
+async function findMissingTables(queryable, tables) {
+  const { rows } = await queryable.query(
+    `SELECT item AS nombre
+     FROM unnest($1::text[]) AS item
+     WHERE to_regclass(item) IS NULL`,
+    [tables]
+  );
+  return rows.map((row) => row.nombre);
+}
 
 function toNumber(value) {
   const parsed = Number(value || 0);
@@ -44,109 +63,28 @@ function resolveSubscriptionStatus(subscription = {}) {
 }
 
 async function ensureSuscripcionesSchema(queryable = db) {
-  if (schemaReady && queryable === db) return;
+  if (schemaReady && queryable === db) {
+    return { ok: true, missingTables: [] };
+  }
 
   await ensureLicenciasSchema(queryable);
 
-  await queryable.query(`
-    CREATE TABLE IF NOT EXISTS suscripciones_empresa (
-      id BIGSERIAL PRIMARY KEY,
-      empresa_id BIGINT NOT NULL UNIQUE REFERENCES empresas(id) ON DELETE CASCADE,
-      licencia_id INTEGER REFERENCES licencias(id) ON DELETE SET NULL,
-      estado VARCHAR(20) NOT NULL DEFAULT 'TRIAL',
-      fecha_inicio TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      fecha_fin TIMESTAMPTZ,
-      renovacion_automatica BOOLEAN NOT NULL DEFAULT FALSE,
-      pasarela VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
-      referencia_externa VARCHAR(150),
-      observaciones TEXT,
-      moneda VARCHAR(10) NOT NULL DEFAULT 'COP',
-      precio_plan NUMERIC(12,2) NOT NULL DEFAULT 0,
-      metadata JSONB,
-      creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
+  const missingTables = await findMissingTables(queryable, REQUIRED_TABLES);
+  if (missingTables.length > 0) {
+    const error = new Error(
+      `Esquema de suscripciones legacy no disponible (tablas faltantes: ${missingTables.join(", ")}). Ejecuta database/003_runtime_cleanup.sql antes de usar compatibilidad transicional.`
+    );
+    error.code = "SCHEMA_NOT_READY";
+    error.status = 500;
+    error.migration = "database/003_runtime_cleanup.sql";
+    throw error;
+  }
 
-  await queryable.query(`
-    CREATE INDEX IF NOT EXISTS suscripciones_empresa_estado_idx
-    ON suscripciones_empresa (estado, fecha_fin)
-  `);
+  if (queryable === db) {
+    schemaReady = true;
+  }
 
-  await queryable.query(`
-    CREATE INDEX IF NOT EXISTS suscripciones_empresa_licencia_idx
-    ON suscripciones_empresa (licencia_id)
-  `);
-
-  await queryable.query(`
-    CREATE TABLE IF NOT EXISTS facturas_saas (
-      id BIGSERIAL PRIMARY KEY,
-      suscripcion_id BIGINT REFERENCES suscripciones_empresa(id) ON DELETE SET NULL,
-      empresa_id BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
-      licencia_id INTEGER REFERENCES licencias(id) ON DELETE SET NULL,
-      numero_factura VARCHAR(60) NOT NULL UNIQUE,
-      concepto VARCHAR(160) NOT NULL,
-      periodo_inicio DATE,
-      periodo_fin DATE,
-      subtotal NUMERIC(12,2) NOT NULL DEFAULT 0,
-      impuestos NUMERIC(12,2) NOT NULL DEFAULT 0,
-      total NUMERIC(12,2) NOT NULL DEFAULT 0,
-      moneda VARCHAR(10) NOT NULL DEFAULT 'COP',
-      estado VARCHAR(20) NOT NULL DEFAULT 'PENDIENTE',
-      fecha_emision DATE NOT NULL DEFAULT CURRENT_DATE,
-      fecha_vencimiento DATE,
-      fecha_pago TIMESTAMPTZ,
-      metodo_pago VARCHAR(40),
-      referencia_pago VARCHAR(150),
-      pasarela VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
-      metadata JSONB,
-      creado_en TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      actualizado_en TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
-
-  await queryable.query(`
-    CREATE INDEX IF NOT EXISTS facturas_saas_empresa_idx
-    ON facturas_saas (empresa_id, fecha_emision DESC)
-  `);
-
-  await queryable.query(`
-    CREATE INDEX IF NOT EXISTS facturas_saas_estado_idx
-    ON facturas_saas (estado, fecha_vencimiento)
-  `);
-
-  await queryable.query(`
-    INSERT INTO suscripciones_empresa (
-      empresa_id, licencia_id, estado, fecha_inicio, fecha_fin,
-      renovacion_automatica, pasarela, moneda, precio_plan, observaciones
-    )
-    SELECT
-      e.id,
-      COALESCE(el.licencia_id, e.licencia_id),
-      CASE
-        WHEN e.activa = FALSE THEN 'SUSPENDIDA'
-        WHEN COALESCE(el.fecha_fin, e.licencia_fin) IS NOT NULL
-          AND COALESCE(el.fecha_fin, e.licencia_fin) < NOW() THEN 'VENCIDA'
-        WHEN LOWER(COALESCE(l.nombre, e.licencia_tipo, 'Demo')) = 'demo' THEN 'TRIAL'
-        ELSE 'ACTIVA'
-      END,
-      COALESCE(el.fecha_inicio, e.licencia_inicio, NOW()),
-      COALESCE(el.fecha_fin, e.licencia_fin),
-      FALSE,
-      'MANUAL',
-      'COP',
-      COALESCE(l.precio, 0),
-      'Migrada desde la configuracion de licencias existente'
-    FROM empresas e
-    LEFT JOIN empresa_licencia el
-      ON el.empresa_id = e.id
-     AND el.activa = TRUE
-    LEFT JOIN licencias l
-      ON l.id = COALESCE(el.licencia_id, e.licencia_id)
-    ON CONFLICT (empresa_id) DO NOTHING
-  `);
-
-  if (queryable === db) schemaReady = true;
+  return { ok: true, missingTables: [] };
 }
 
 async function getSuscripcionEmpresa(queryable, empresaId) {
