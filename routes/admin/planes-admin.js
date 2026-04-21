@@ -25,6 +25,8 @@ const {
   getEmpresaCompleta,
   onboardEmpresa,
   listarPlanes,
+  crearPlan,
+  actualizarPlan,
   asignarPlan,
   cambiarEstadoSuscripcion,
   getProximasAVencer,
@@ -33,6 +35,19 @@ const {
   crearAdminTenant,
 } = require('../../services/adminService');
 const db = require('../../db');
+const validate = require('../../src/middlewares/validate');
+const { adminMutationLimiter, userRegistrationLimiter } = require('../../src/lib/security/rate-limit');
+const {
+  assignPlanBodySchema,
+  changeSubscriptionStateBodySchema,
+  createAdminTenantBodySchema,
+  createPlanBodySchema,
+  empresaIdParamSchema,
+  idParamSchema,
+  onboardingBodySchema,
+  proximasVencerQuerySchema,
+  updatePlanBodySchema,
+} = require('../../src/lib/validation/admin.schemas');
 
 const router = express.Router();
 
@@ -68,6 +83,24 @@ router.get('/planes', async (req, res) => {
   }
 });
 
+router.post('/planes', adminMutationLimiter, validate({ body: createPlanBodySchema }), async (req, res) => {
+  try {
+    const plan = await crearPlan(req.body);
+    res.status(201).json({ mensaje: 'Plan creado.', plan });
+  } catch (err) {
+    handleError(res, err, 'Error creando plan.');
+  }
+});
+
+router.put('/planes/:id', adminMutationLimiter, validate({ params: idParamSchema, body: updatePlanBodySchema }), async (req, res) => {
+  try {
+    const plan = await actualizarPlan(req.params.id, req.body);
+    res.json({ mensaje: 'Plan actualizado.', plan });
+  } catch (err) {
+    handleError(res, err, 'Error actualizando plan.');
+  }
+});
+
 // ─── LISTA DE EMPRESAS ───────────────────────────────────────
 
 router.get('/empresas', async (req, res) => {
@@ -79,7 +112,7 @@ router.get('/empresas', async (req, res) => {
   }
 });
 
-router.get('/empresas/:id', async (req, res) => {
+router.get('/empresas/:id', validate({ params: idParamSchema }), async (req, res) => {
   try {
     const empresaId = Number(req.params.id);
     const [empresa, modulos] = await Promise.all([
@@ -106,7 +139,7 @@ router.get('/resumen', async (req, res) => {
 
 // ─── PRÓXIMAS A VENCER ───────────────────────────────────────
 
-router.get('/proximas-vencer', async (req, res) => {
+router.get('/proximas-vencer', validate({ query: proximasVencerQuerySchema }), async (req, res) => {
   try {
     const dias = Number(req.query.dias) || 30;
     const lista = await getProximasAVencer(dias);
@@ -123,7 +156,7 @@ router.get('/proximas-vencer', async (req, res) => {
 //     zonaHoraria?, planCodigo?,
 //     adminNombre?, adminEmail?, adminPassword? }
 
-router.post('/onboarding', async (req, res) => {
+router.post('/onboarding', userRegistrationLimiter, adminMutationLimiter, validate({ body: onboardingBodySchema }), async (req, res) => {
   try {
     const result = await onboardEmpresa(req.body);
     res.status(201).json({
@@ -138,7 +171,7 @@ router.post('/onboarding', async (req, res) => {
 
 // ─── SUSCRIPCIÓN DE UNA EMPRESA ──────────────────────────────
 
-router.get('/suscripcion/:empresaId', async (req, res) => {
+router.get('/suscripcion/:empresaId', validate({ params: empresaIdParamSchema }), async (req, res) => {
   try {
     const empresaId = Number(req.params.empresaId);
     const { rows } = await db.query(`
@@ -164,12 +197,10 @@ router.get('/suscripcion/:empresaId', async (req, res) => {
 // POST /suscripcion/:empresaId
 // Body: { plan_id, ciclo?, precio_pactado?, moneda?, fecha_fin?, estado?, observaciones?, pasarela? }
 
-router.post('/suscripcion/:empresaId', async (req, res) => {
+router.post('/suscripcion/:empresaId', adminMutationLimiter, validate({ params: empresaIdParamSchema, body: assignPlanBodySchema }), async (req, res) => {
   try {
     const empresaId = Number(req.params.empresaId);
     const { plan_id, ...opts } = req.body;
-
-    if (!plan_id) return res.status(400).json({ error: 'plan_id es requerido.' });
 
     const suscripcion = await asignarPlan(empresaId, Number(plan_id), {
       ciclo:         opts.ciclo,
@@ -190,12 +221,10 @@ router.post('/suscripcion/:empresaId', async (req, res) => {
 // POST /suscripcion/:empresaId/estado
 // Body: { estado: 'ACTIVA'|'SUSPENDIDA'|'CANCELADA'|'VENCIDA' }
 
-router.post('/suscripcion/:empresaId/estado', async (req, res) => {
+router.post('/suscripcion/:empresaId/estado', adminMutationLimiter, validate({ params: empresaIdParamSchema, body: changeSubscriptionStateBodySchema }), async (req, res) => {
   try {
     const empresaId  = Number(req.params.empresaId);
     const { estado } = req.body;
-
-    if (!estado) return res.status(400).json({ error: 'estado es requerido.' });
 
     const suscripcion = await cambiarEstadoSuscripcion(empresaId, String(estado).toUpperCase());
     res.json({ mensaje: `Suscripción actualizada a ${estado}.`, suscripcion });
@@ -208,7 +237,7 @@ router.post('/suscripcion/:empresaId/estado', async (req, res) => {
 //
 // Body: { nombre, email, password, rol? }
 
-router.post('/usuarios/:empresaId', async (req, res) => {
+router.post('/usuarios/:empresaId', userRegistrationLimiter, adminMutationLimiter, validate({ params: empresaIdParamSchema, body: createAdminTenantBodySchema }), async (req, res) => {
   try {
     const empresaId = Number(req.params.empresaId);
     const usuario   = await crearAdminTenant(empresaId, req.body);

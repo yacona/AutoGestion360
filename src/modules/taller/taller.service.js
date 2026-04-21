@@ -6,6 +6,7 @@
 const db = require('../../../db');
 const AppError = require('../../lib/AppError');
 const withTransaction = require('../../lib/withTransaction');
+const { assertEmpresaOwnedRecord } = require('../../lib/tenant-scope');
 const {
   METODOS_PAGO_VALIDOS,
   registrarPagoServicio,
@@ -47,6 +48,16 @@ async function crear(empresaId, body) {
     throw new AppError('Placa y descripción de la falla son obligatorias.', 400);
   }
 
+  if (cliente_id) {
+    await assertEmpresaOwnedRecord(db, 'clientes', empresaId, cliente_id, 'El cliente indicado no pertenece a esta empresa.');
+  }
+  if (vehiculo_id) {
+    await assertEmpresaOwnedRecord(db, 'vehiculos', empresaId, vehiculo_id, 'El vehículo indicado no pertenece a esta empresa.');
+  }
+  if (mecanicoFinal) {
+    await assertEmpresaOwnedRecord(db, 'empleados', empresaId, mecanicoFinal, 'El mecánico indicado no pertenece a esta empresa.');
+  }
+
   const { rows: maxRow } = await db.query(
     `SELECT COALESCE(MAX(numero_orden::bigint),0)+1 AS siguiente
      FROM taller_ordenes WHERE empresa_id=$1`,
@@ -74,8 +85,8 @@ async function listar(empresaId, { estado, placa } = {}) {
   const { rows } = await db.query(
     `SELECT ${OT_FIELDS}
      FROM taller_ordenes ot
-     LEFT JOIN clientes c ON c.id=ot.cliente_id
-     LEFT JOIN empleados e ON e.id=ot.mecanico_id
+     LEFT JOIN clientes c ON c.id=ot.cliente_id AND c.empresa_id=ot.empresa_id
+     LEFT JOIN empleados e ON e.id=ot.mecanico_id AND e.empresa_id=ot.empresa_id
      WHERE ${condiciones.join(' AND ')}
      ORDER BY ot.fecha_creacion DESC`,
     params
@@ -87,8 +98,8 @@ async function obtener(empresaId, id) {
   const { rows: otRows } = await db.query(
     `SELECT ${OT_FIELDS}
      FROM taller_ordenes ot
-     LEFT JOIN clientes c ON c.id=ot.cliente_id
-     LEFT JOIN empleados e ON e.id=ot.mecanico_id
+     LEFT JOIN clientes c ON c.id=ot.cliente_id AND c.empresa_id=ot.empresa_id
+     LEFT JOIN empleados e ON e.id=ot.mecanico_id AND e.empresa_id=ot.empresa_id
      WHERE ot.empresa_id=$1 AND ot.id=$2
      LIMIT 1`,
     [empresaId, id]
@@ -114,8 +125,8 @@ async function historial(empresaId, { desde, hasta, estado, mecanico_id } = {}) 
   const { rows } = await db.query(
     `SELECT ${OT_FIELDS}
      FROM taller_ordenes ot
-     LEFT JOIN clientes c ON c.id=ot.cliente_id
-     LEFT JOIN empleados e ON e.id=ot.mecanico_id
+     LEFT JOIN clientes c ON c.id=ot.cliente_id AND c.empresa_id=ot.empresa_id
+     LEFT JOIN empleados e ON e.id=ot.mecanico_id AND e.empresa_id=ot.empresa_id
      WHERE ${condiciones.join(' AND ')}
      ORDER BY ot.fecha_creacion DESC`,
     params

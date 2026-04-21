@@ -20,6 +20,14 @@ const {
   upsertModuloOverride,
   removeModuloOverride,
 } = require('../../services/adminService');
+const validate = require('../../src/middlewares/validate');
+const { adminMutationLimiter } = require('../../src/lib/security/rate-limit');
+const {
+  empresaIdParamSchema,
+  moduloIdParamSchema,
+  moduloOverrideBodySchema,
+  moduloOverrideBulkBodySchema,
+} = require('../../src/lib/validation/admin.schemas');
 
 const router = express.Router();
 
@@ -40,7 +48,7 @@ router.use((req, res, next) => {
 
 // ─── GET /:empresaId ────────────────────────────────────────
 
-router.get('/:empresaId', async (req, res) => {
+router.get('/:empresaId', validate({ params: empresaIdParamSchema }), async (req, res) => {
   try {
     const empresaId = Number(req.params.empresaId);
     if (!empresaId) return res.status(400).json({ error: 'ID de empresa inválido.' });
@@ -57,7 +65,7 @@ router.get('/:empresaId', async (req, res) => {
 //
 // Body: { activo: boolean, limite_override?: number|null, notas?: string }
 
-router.put('/:empresaId/:moduloId', async (req, res) => {
+router.put('/:empresaId/:moduloId', adminMutationLimiter, validate({ params: moduloIdParamSchema, body: moduloOverrideBodySchema }), async (req, res) => {
   try {
     const empresaId = Number(req.params.empresaId);
     const moduloId  = Number(req.params.moduloId);
@@ -83,7 +91,7 @@ router.put('/:empresaId/:moduloId', async (req, res) => {
 
 // ─── DELETE /:empresaId/:moduloId ────────────────────────────
 
-router.delete('/:empresaId/:moduloId', async (req, res) => {
+router.delete('/:empresaId/:moduloId', adminMutationLimiter, validate({ params: moduloIdParamSchema }), async (req, res) => {
   try {
     const empresaId = Number(req.params.empresaId);
     const moduloId  = Number(req.params.moduloId);
@@ -108,14 +116,9 @@ router.delete('/:empresaId/:moduloId', async (req, res) => {
 // Body: { overrides: [{ modulo_id, activo, limite_override?, notas? }] }
 // Permite guardar todos los toggles del panel en un solo request.
 
-router.put('/:empresaId/bulk', async (req, res) => {
+router.put('/:empresaId/bulk', adminMutationLimiter, validate({ params: empresaIdParamSchema, body: moduloOverrideBulkBodySchema }), async (req, res) => {
   const empresaId = Number(req.params.empresaId);
-  if (!empresaId) return res.status(400).json({ error: 'ID de empresa inválido.' });
-
   const overrides = req.body.overrides;
-  if (!Array.isArray(overrides)) {
-    return res.status(400).json({ error: 'Se esperaba { overrides: [...] }' });
-  }
 
   try {
     const results = [];

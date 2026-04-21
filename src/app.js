@@ -1,11 +1,17 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const path = require('path');
 
 const authMiddleware = require('../middleware/auth');
 const licenseMiddleware = require('../middleware/licencia');
 const errorHandler = require('./middlewares/errorHandler');
+const {
+  buildCorsOptions,
+  getRequestBodyLimit,
+  getTrustProxy,
+} = require('./lib/security/http');
 
 // ── Módulos refactorizados ────────────────────────────────────────────────────
 const authRoutes               = require('./modules/auth/auth.routes');
@@ -34,10 +40,23 @@ const adminPlanesRoutes      = require('../routes/admin/planes-admin');
 const adminEmpresaModRoutes  = require('../routes/admin/empresa-modulos');
 
 const app = express();
+const corsOptions = buildCorsOptions();
+const requestBodyLimit = getRequestBodyLimit();
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static('frontend'));
+app.disable('x-powered-by');
+app.set('trust proxy', getTrustProxy());
+
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: false,
+}));
+app.use(cors(corsOptions));
+app.use(express.json({ limit: requestBodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
+app.use(express.static('frontend', {
+  dotfiles: 'ignore',
+}));
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // Health check

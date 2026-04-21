@@ -1,6 +1,7 @@
 const db = require('../../../db');
 const AppError = require('../../lib/AppError');
 const withTransaction = require('../../lib/withTransaction');
+const { assertEmpresaOwnedRecord } = require('../../lib/tenant-scope');
 const {
   METODOS_PAGO_VALIDOS,
   registrarPagoServicio,
@@ -59,6 +60,19 @@ async function crear(empresaId, body) {
     throw new AppError('Placa y tipo de lavado son obligatorios.', 400);
   }
 
+  if (cliente_id) {
+    await assertEmpresaOwnedRecord(db, 'clientes', empresaId, cliente_id, 'El cliente indicado no pertenece a esta empresa.');
+  }
+  if (vehiculo_id) {
+    await assertEmpresaOwnedRecord(db, 'vehiculos', empresaId, vehiculo_id, 'El vehículo indicado no pertenece a esta empresa.');
+  }
+  if (lavador_id || empleado_id) {
+    await assertEmpresaOwnedRecord(db, 'empleados', empresaId, lavador_id || empleado_id, 'El empleado asignado no pertenece a esta empresa.');
+  }
+  if (tipo_lavado_id) {
+    await assertEmpresaOwnedRecord(db, 'tipos_lavado', empresaId, tipo_lavado_id, 'El tipo de lavado no pertenece a esta empresa.');
+  }
+
   let tipoLavadoId = tipo_lavado_id || null;
   let precioFinal  = precio || null;
 
@@ -110,8 +124,8 @@ async function listar(empresaId, { estado } = {}) {
     `SELECT l.*, tl.nombre AS tipo_lavado_nombre, tl.nombre AS tipo_lavado,
             e.nombre AS lavador_nombre, e.nombre AS empleado_nombre
      FROM lavadero l
-     LEFT JOIN tipos_lavado tl ON tl.id=l.tipo_lavado_id
-     LEFT JOIN empleados e ON e.id=l.lavador_id
+     LEFT JOIN tipos_lavado tl ON tl.id=l.tipo_lavado_id AND tl.empresa_id=l.empresa_id
+     LEFT JOIN empleados e ON e.id=l.lavador_id AND e.empresa_id=l.empresa_id
      WHERE ${where} ORDER BY l.id DESC`,
     params
   );
@@ -124,10 +138,10 @@ async function obtener(empresaId, id) {
             e.nombre AS lavador_nombre, v.placa AS vehiculo_placa,
             v.marca, v.modelo, c.nombre AS cliente_nombre, c.telefono AS cliente_telefono
      FROM lavadero l
-     LEFT JOIN tipos_lavado tl ON tl.id=l.tipo_lavado_id
-     LEFT JOIN empleados e ON e.id=l.lavador_id
-     LEFT JOIN vehiculos v ON v.id=l.vehiculo_id
-     LEFT JOIN clientes c ON c.id=v.cliente_id
+     LEFT JOIN tipos_lavado tl ON tl.id=l.tipo_lavado_id AND tl.empresa_id=l.empresa_id
+     LEFT JOIN empleados e ON e.id=l.lavador_id AND e.empresa_id=l.empresa_id
+     LEFT JOIN vehiculos v ON v.id=l.vehiculo_id AND v.empresa_id=l.empresa_id
+     LEFT JOIN clientes c ON c.id=v.cliente_id AND c.empresa_id=l.empresa_id
      WHERE l.empresa_id=$1 AND l.id=$2`,
     [empresaId, id]
   );
@@ -146,8 +160,8 @@ async function historial(empresaId, { desde, hasta, lavador_id } = {}) {
   const { rows } = await db.query(
     `SELECT l.*, tl.nombre AS tipo_lavado_nombre, e.nombre AS lavador_nombre
      FROM lavadero l
-     LEFT JOIN tipos_lavado tl ON tl.id=l.tipo_lavado_id
-     LEFT JOIN empleados e ON e.id=l.lavador_id
+     LEFT JOIN tipos_lavado tl ON tl.id=l.tipo_lavado_id AND tl.empresa_id=l.empresa_id
+     LEFT JOIN empleados e ON e.id=l.lavador_id AND e.empresa_id=l.empresa_id
      WHERE ${condiciones.join(' AND ')} ORDER BY l.id DESC`,
     params
   );
@@ -255,6 +269,9 @@ async function registrarPago(empresaId, id, { metodo_pago, detalle_pago }) {
 }
 
 async function asignarLavador(empresaId, id, lavador_id) {
+  if (lavador_id) {
+    await assertEmpresaOwnedRecord(db, 'empleados', empresaId, lavador_id, 'El empleado asignado no pertenece a esta empresa.');
+  }
   const { rows } = await db.query(
     `UPDATE lavadero SET lavador_id=$1 WHERE empresa_id=$2 AND id=$3 RETURNING *`,
     [lavador_id, empresaId, id]

@@ -1,6 +1,7 @@
 const db = require('../../../db');
 const AppError = require('../../lib/AppError');
 const { normalizarPlaca, toNumber } = require('../../lib/helpers');
+const { assertEmpresaOwnedRecord } = require('../../lib/tenant-scope');
 
 const STATS_JOIN = /* sql */`
   LEFT JOIN (
@@ -36,10 +37,20 @@ async function crear(empresaId, body) {
 
   const placaNormalizada = normalizarPlaca(placa);
 
+  if (cliente_id) {
+    await assertEmpresaOwnedRecord(
+      db,
+      'clientes',
+      empresaId,
+      cliente_id,
+      'El cliente indicado no pertenece a esta empresa.'
+    );
+  }
+
   const { rows: existentes } = await db.query(
     `SELECT v.*, c.nombre AS cliente_nombre
      FROM vehiculos v
-     LEFT JOIN clientes c ON c.id = v.cliente_id
+     LEFT JOIN clientes c ON c.id = v.cliente_id AND c.empresa_id = v.empresa_id
      WHERE v.empresa_id = $1 AND v.placa = $2
      LIMIT 1`,
     [empresaId, placaNormalizada]
@@ -78,7 +89,7 @@ async function buscarPorPlaca(empresaId, placa) {
   const { rows } = await db.query(
     `SELECT v.*, c.nombre AS cliente_nombre, c.telefono AS cliente_telefono
      FROM vehiculos v
-     LEFT JOIN clientes c ON c.id = v.cliente_id
+     LEFT JOIN clientes c ON c.id = v.cliente_id AND c.empresa_id = v.empresa_id
      WHERE v.empresa_id = $1 AND v.placa = $2
      LIMIT 1`,
     [empresaId, normalizarPlaca(placa)]
@@ -103,7 +114,7 @@ async function perfil360(empresaId, placa) {
               c.id AS cliente_id, c.nombre AS cliente_nombre,
               c.documento AS cliente_documento, c.telefono AS cliente_telefono, c.correo AS cliente_correo
        FROM vehiculos v
-       LEFT JOIN clientes c ON c.id = v.cliente_id
+       LEFT JOIN clientes c ON c.id = v.cliente_id AND c.empresa_id = v.empresa_id
        WHERE v.empresa_id = $1 AND v.placa = $2
        LIMIT 1`,
       [empresaId, placaN]

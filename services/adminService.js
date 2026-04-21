@@ -13,6 +13,7 @@
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { getParqueaderoConfig } = require('../utils/parqueadero-config');
+const { assertEmpresaOwnedRecord, assertGlobalRecord } = require('../src/lib/tenant-scope');
 
 // ─────────────────────────────────────────────────────────────
 // Helpers internos
@@ -74,6 +75,7 @@ async function listarEmpresas(queryable = db) {
  * Devuelve una empresa con su suscripción activa y módulos habilitados.
  */
 async function getEmpresaCompleta(empresaId, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
   const { rows } = await queryable.query(`
     SELECT
       e.*,
@@ -94,6 +96,33 @@ async function getEmpresaCompleta(empresaId, queryable = db) {
     LIMIT 1
   `, [empresaId]);
   return rows[0] ?? null;
+}
+
+async function syncPlanModulos(queryable, planId, modulos = []) {
+  await queryable.query('DELETE FROM plan_modulos WHERE plan_id = $1', [planId]);
+
+  if (!Array.isArray(modulos) || modulos.length === 0) return;
+
+  for (const modulo of modulos) {
+    await assertGlobalRecord(
+      queryable,
+      'modulos',
+      modulo.modulo_id,
+      `Módulo ${modulo.modulo_id} no encontrado.`
+    );
+
+    await queryable.query(
+      `INSERT INTO plan_modulos (plan_id, modulo_id, limite_registros, activo, metadata)
+       VALUES ($1, $2, $3, $4, $5::jsonb)`,
+      [
+        planId,
+        modulo.modulo_id,
+        modulo.limite_registros ?? null,
+        modulo.activo !== false,
+        modulo.metadata ? JSON.stringify(modulo.metadata) : null,
+      ]
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -217,6 +246,133 @@ async function listarPlanes(queryable = db) {
   return rows;
 }
 
+async function crearPlan(data, queryable = db) {
+  const isExternalClient = queryable !== db && typeof queryable.query === 'function' && !queryable.connect;
+  const client = isExternalClient ? queryable : await db.connect();
+
+  try {
+    if (!isExternalClient) await client.query('BEGIN');
+
+    const {
+      codigo,
+      nombre,
+      descripcion = null,
+      precio_mensual = 0,
+      precio_anual = null,
+      moneda = 'COP',
+      trial_dias = 14,
+      max_usuarios = null,
+      max_vehiculos = null,
+      max_empleados = null,
+      es_publico = true,
+      activo = true,
+      orden = 0,
+      metadata = null,
+      modulos = [],
+    } = data;
+
+    const { rows } = await client.query(
+      `INSERT INTO planes
+       (codigo, nombre, descripcion, precio_mensual, precio_anual, moneda, trial_dias,
+        max_usuarios, max_vehiculos, max_empleados, es_publico, activo, orden, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)
+       RETURNING *`,
+      [
+        clean(codigo),
+        clean(nombre),
+        clean(descripcion),
+        precio_mensual,
+        precio_anual,
+        clean(moneda) || 'COP',
+        trial_dias,
+        max_usuarios,
+        max_vehiculos,
+        max_empleados,
+        es_publico !== false,
+        activo !== false,
+        orden ?? 0,
+        metadata ? JSON.stringify(metadata) : null,
+      ]
+    );
+
+    const plan = rows[0];
+    await syncPlanModulos(client, plan.id, modulos);
+
+    if (!isExternalClient) await client.query('COMMIT');
+    return plan;
+  } catch (err) {
+    if (!isExternalClient) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (!isExternalClient) client.release();
+  }
+}
+
+async function actualizarPlan(planId, data, queryable = db) {
+  await assertGlobalRecord(queryable, 'planes', planId, 'Plan no encontrado.');
+
+  const isExternalClient = queryable !== db && typeof queryable.query === 'function' && !queryable.connect;
+  const client = isExternalClient ? queryable : await db.connect();
+
+  try {
+    if (!isExternalClient) await client.query('BEGIN');
+
+    const campos = [];
+    const valores = [];
+    let idx = 1;
+
+    const mapping = {
+      codigo: clean(data.codigo),
+      nombre: clean(data.nombre),
+      descripcion: data.descripcion === undefined ? undefined : clean(data.descripcion),
+      precio_mensual: data.precio_mensual,
+      precio_anual: data.precio_anual,
+      moneda: data.moneda === undefined ? undefined : (clean(data.moneda) || 'COP'),
+      trial_dias: data.trial_dias,
+      max_usuarios: data.max_usuarios,
+      max_vehiculos: data.max_vehiculos,
+      max_empleados: data.max_empleados,
+      es_publico: data.es_publico,
+      activo: data.activo,
+      orden: data.orden,
+    };
+
+    for (const [campo, valor] of Object.entries(mapping)) {
+      if (valor === undefined) continue;
+      campos.push(`${campo} = $${idx++}`);
+      valores.push(valor);
+    }
+
+    if (data.metadata !== undefined) {
+      campos.push(`metadata = $${idx++}::jsonb`);
+      valores.push(data.metadata ? JSON.stringify(data.metadata) : null);
+    }
+
+    if (campos.length > 0) {
+      campos.push(`actualizado_en = NOW()`);
+      valores.push(planId);
+      await client.query(
+        `UPDATE planes SET ${campos.join(', ')} WHERE id = $${idx}`,
+        valores
+      );
+    }
+
+    if (data.modulos !== undefined) {
+      await syncPlanModulos(client, planId, data.modulos);
+    }
+
+    const { rows } = await client.query('SELECT * FROM planes WHERE id = $1 LIMIT 1', [planId]);
+
+    if (!isExternalClient) await client.query('COMMIT');
+    return rows[0];
+  } catch (err) {
+    if (!isExternalClient) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (!isExternalClient) client.release();
+  }
+}
+
 /**
  * Asigna un plan a una empresa.
  * Cancela la suscripción activa anterior (si es diferente plan).
@@ -227,6 +383,7 @@ async function listarPlanes(queryable = db) {
  * @param {object} opts  ciclo, precioPactado, moneda, fechaFin, observaciones, pasarela
  */
 async function asignarPlan(empresaId, planId, opts = {}, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
   const {
     ciclo = 'MENSUAL',
     precioPactado = null,
@@ -289,6 +446,7 @@ async function asignarPlan(empresaId, planId, opts = {}, queryable = db) {
  * estados válidos: ACTIVA | SUSPENDIDA | CANCELADA | VENCIDA
  */
 async function cambiarEstadoSuscripcion(empresaId, nuevoEstado, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
   const ESTADOS = ['ACTIVA', 'TRIAL', 'SUSPENDIDA', 'CANCELADA', 'VENCIDA'];
   if (!ESTADOS.includes(nuevoEstado)) {
     throw Object.assign(new Error(`Estado inválido: ${nuevoEstado}`), { statusCode: 400 });
@@ -395,6 +553,7 @@ async function getResumenSaas(queryable = db) {
  *   'no_incluido' → ni el plan ni override lo incluyen
  */
 async function getModulosParaEmpresa(empresaId, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
   const { rows } = await queryable.query(`
     SELECT
       m.id,
@@ -441,6 +600,8 @@ async function getModulosParaEmpresa(empresaId, queryable = db) {
  * @param {string}  [notas]
  */
 async function upsertModuloOverride(empresaId, moduloId, { activo = true, limiteOverride = null, notas = null } = {}, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
+  await assertGlobalRecord(queryable, 'modulos', moduloId, 'Módulo no encontrado.');
   const { rows } = await queryable.query(`
     INSERT INTO empresa_modulos (empresa_id, modulo_id, activo, limite_override, notas)
     VALUES ($1, $2, $3, $4, $5)
@@ -457,6 +618,7 @@ async function upsertModuloOverride(empresaId, moduloId, { activo = true, limite
 
 /** Elimina el override de un módulo (vuelve al comportamiento del plan). */
 async function removeModuloOverride(empresaId, moduloId, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
   const { rowCount } = await queryable.query(
     'DELETE FROM empresa_modulos WHERE empresa_id = $1 AND modulo_id = $2',
     [empresaId, moduloId]
@@ -473,6 +635,7 @@ async function removeModuloOverride(empresaId, moduloId, queryable = db) {
  * Verifica que el email sea único globalmente.
  */
 async function crearAdminTenant(empresaId, { nombre, email, password, rol = 'Administrador' }, queryable = db) {
+  await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
   requireField(email, 'email');
   requireField(password, 'password');
   if (String(password).trim().length < 6) {
@@ -502,6 +665,8 @@ module.exports = {
   onboardEmpresa,
   // Planes y suscripciones
   listarPlanes,
+  crearPlan,
+  actualizarPlan,
   asignarPlan,
   cambiarEstadoSuscripcion,
   getProximasAVencer,
