@@ -80,10 +80,44 @@ async function agregarAlertasLicencia(empresaId, alertas, resumen) {
   const empresa = empresas[0];
   if (!empresa) return;
 
-  let licencia = { nombre: empresa.licencia_tipo || 'Sin plan', fecha_inicio: empresa.licencia_inicio,
-    fecha_fin: empresa.licencia_fin, activa: empresa.activa };
+  let licencia = null;
 
-  if (await tableExists('empresa_licencia')) {
+  if (await tableExists('suscripciones') && await tableExists('planes')) {
+    const { rows } = await db.query(
+      `SELECT
+         p.nombre AS nombre,
+         s.estado,
+         s.fecha_inicio,
+         s.fecha_fin,
+         s.trial_hasta
+       FROM suscripciones s
+       JOIN planes p ON p.id = s.plan_id
+       WHERE s.empresa_id = $1
+       ORDER BY
+         CASE WHEN s.estado IN ('TRIAL', 'ACTIVA') THEN 0 ELSE 1 END,
+         COALESCE(
+           CASE WHEN s.estado = 'TRIAL' THEN s.trial_hasta ELSE NULL END,
+           s.fecha_fin,
+           s.actualizado_en,
+           s.creado_en
+         ) DESC NULLS LAST,
+         s.id DESC
+       LIMIT 1`,
+      [empresaId]
+    );
+
+    if (rows[0]) {
+      const row = rows[0];
+      licencia = {
+        nombre: row.nombre || 'Plan SaaS',
+        fecha_inicio: row.fecha_inicio,
+        fecha_fin: row.fecha_fin || row.trial_hasta || null,
+        activa: empresa.activa && ['TRIAL', 'ACTIVA'].includes(String(row.estado || '').toUpperCase()),
+      };
+    }
+  }
+
+  if (!licencia && await tableExists('empresa_licencia')) {
     const hasLicencias = await tableExists('licencias');
     const q = hasLicencias
       ? `SELECT el.fecha_inicio,el.fecha_fin,el.activa,COALESCE(l.nombre,e.licencia_tipo,'Sin plan') AS nombre
@@ -94,6 +128,15 @@ async function agregarAlertasLicencia(empresaId, alertas, resumen) {
          WHERE el.empresa_id=$1 AND el.activa=TRUE ORDER BY el.fecha_fin NULLS LAST LIMIT 1`;
     const { rows } = await db.query(q, [empresaId]);
     if (rows[0]) licencia = rows[0];
+  }
+
+  if (!licencia) {
+    licencia = {
+      nombre: empresa.licencia_tipo || 'Sin plan',
+      fecha_inicio: empresa.licencia_inicio,
+      fecha_fin: empresa.licencia_fin,
+      activa: empresa.activa,
+    };
   }
 
   const diasRestantes = daysUntil(licencia.fecha_fin);

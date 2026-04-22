@@ -7,14 +7,16 @@
  *
  *   requireLicense              → empresa activa + suscripción vigente
  *   requireModule('parqueadero')→ lo anterior + módulo habilitado en el plan
- *   requirePermission('accion') → rol del usuario tiene el permiso
+ *   requirePermission('accion') → rol del usuario tiene el permiso (DB-backed)
  *
- * Patrón de caché: el primero que ejecute getLicenseStatus() deja el resultado
- * en req.licencia para que los siguientes no repitan la consulta en la misma
- * petición.
+ * Patrón de caché:
+ *   - getLicenseStatus() deja el resultado en req.licencia para reusar en la misma petición.
+ *   - requirePermission() carga permisos del usuario desde DB (con TTL 5 min en memoria).
+ *     Si las tablas RBAC no existen aún, usa el mapa hardcoded como fallback.
  */
 
 const { getLicenseStatus } = require('../services/licenseService');
+const rbac = require('../src/lib/rbac/rbac.service');
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -178,27 +180,50 @@ function getPermisosParaRol(rol) {
 
 /**
  * Valida si el usuario autenticado tiene un permiso específico.
+ * Consulta la tabla usuario_roles/rol_permisos en BD (con caché de 5 min).
+ * Si las tablas RBAC aún no existen, usa el mapa hardcoded como fallback.
  *
  * Uso:
  *   router.delete('/:id', requirePermission('clientes:eliminar'), handler);
  *   router.post('/exportar', requirePermission('reportes:exportar'), handler);
  */
 function requirePermission(permiso) {
-  return function (req, res, next) {
+  return async function (req, res, next) {
     if (esSuperAdmin(req)) return next();
 
-    // Permisos pueden venir en req.user si el login los incluyó (ver auth.js)
-    const lista = req.user?.permisos ?? getPermisosParaRol(req.user?.rol);
+    try {
+      // Caché a nivel de request: evita múltiples consultas en un mismo ciclo
+      if (!req._rbac_permisos) {
+        req._rbac_permisos = await rbac.getPermisosFromDB(
+          req.user.id,
+          req.user.empresa_id ?? null
+        );
+      }
 
-    if (lista.includes('*') || lista.includes(permiso)) {
-      return next();
+      const lista = req._rbac_permisos;
+      if (lista.includes('*') || lista.includes(permiso)) {
+        return next();
+      }
+
+      return res.status(403).json({
+        error:  'No tienes permiso para esta acción.',
+        permiso,
+        codigo: 'PERMISO_DENEGADO',
+      });
+    } catch (err) {
+      // Fallback al mapa hardcoded si la migración RBAC aún no se ejecutó
+      if (err?.code === '42P01' || err?.code === '42703') {
+        const lista = req.user?.permisos ?? getPermisosParaRol(req.user?.rol);
+        if (lista.includes('*') || lista.includes(permiso)) return next();
+        return res.status(403).json({
+          error:  'No tienes permiso para esta acción.',
+          permiso,
+          codigo: 'PERMISO_DENEGADO',
+        });
+      }
+      console.error('[requirePermission]', err);
+      return res.status(500).json({ error: 'Error interno al verificar permisos.' });
     }
-
-    return res.status(403).json({
-      error:  'No tienes permiso para esta acción.',
-      permiso,
-      codigo: 'PERMISO_DENEGADO',
-    });
   };
 }
 

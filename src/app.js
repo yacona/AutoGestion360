@@ -31,6 +31,7 @@ const empresasRoutes           = require('./modules/empresas/empresas.routes');
 const usuariosRoutes           = require('./modules/usuarios/usuarios.routes');
 const licenciasRoutes          = require('./modules/licencias/licencias.routes');
 const suscripcionesRoutes      = require('./modules/suscripciones/suscripciones.routes');
+const sedesRoutes              = require('./modules/sedes/sedes.routes');
 
 // ── Módulo legacy sin migrar ──────────────────────────────────────────────────
 const reportesRoutes = require('../routes/reportes');
@@ -87,6 +88,7 @@ app.use('/api/auditoria', authMiddleware, auditoriaRoutes);
 app.use('/api/configuracion', authMiddleware, licenseMiddleware('configuracion'), configuracionRoutes);
 app.use('/api/empresas', authMiddleware, empresasRoutes);
 app.use('/api/usuarios', authMiddleware, licenseMiddleware('usuarios'), usuariosRoutes);
+app.use('/api/sedes', authMiddleware, licenseMiddleware('configuracion'), sedesRoutes);
 app.use('/api/licencias', authMiddleware, licenciasRoutes);
 app.use('/api/suscripciones', authMiddleware, suscripcionesRoutes);
 

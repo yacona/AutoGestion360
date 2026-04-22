@@ -1,5 +1,6 @@
 const db = require("../db");
 const { ensureLicenciasSchema } = require("./licencias-schema");
+const { syncSaasSubscriptionFromLegacy } = require("../services/saasCompatibilityService");
 
 // Compatibilidad transicional: este helper ya no crea tablas en runtime.
 // Si la estructura legacy de suscripciones no existe, debe aplicarse
@@ -130,6 +131,7 @@ async function upsertSuscripcionEmpresa({
   moneda = "COP",
   precioPlan = null,
   metadata = null,
+  skipOfficialSync = false,
 }) {
   await ensureSuscripcionesSchema(queryable);
 
@@ -219,6 +221,24 @@ async function upsertSuscripcionEmpresa({
      WHERE id = $5`,
     [licenciaIdNum, licencia.nombre, fechaInicio || null, fechaFin || null, empresaIdNum]
   );
+
+  if (!skipOfficialSync) {
+    await syncSaasSubscriptionFromLegacy({
+      queryable,
+      empresaId: empresaIdNum,
+      licenciaId: licenciaIdNum,
+      licenciaNombre: licencia.nombre,
+      estado: estadoNormalizado,
+      fechaInicio: fechaInicio || null,
+      fechaFin: fechaFin || null,
+      renovacionAutomatica: Boolean(renovacionAutomatica),
+      pasarela: pasarelaNormalizada,
+      precioPactado: precioFinal,
+      moneda: moneda || "COP",
+      observaciones: "Sincronizada desde suscripciones_empresa",
+      metadata,
+    });
+  }
 
   return getSuscripcionEmpresa(queryable, empresaIdNum);
 }

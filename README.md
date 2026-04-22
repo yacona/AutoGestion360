@@ -201,7 +201,7 @@ Vista de compatibilidad todavía usada indirectamente:
 
 ## Riesgos conocidos
 
-- Coexisten dos sistemas de suscripción: `suscripciones_empresa` y `suscripciones`.
+- `suscripciones` es la fuente oficial SaaS; `suscripciones_empresa` y `empresa_licencia` quedan como compatibilidad temporal.
 - Aún hay DDL en runtime en algunos helpers y rutas legacy.
 - `.env` aparece rastreado por git en el estado actual del repositorio y debe retirarse del índice antes de publicar o compartir el proyecto.
 
@@ -209,6 +209,8 @@ Vista de compatibilidad todavía usada indirectamente:
 
 - `docs/arquitectura-actual.md`
 - `docs/roadmap-saas.md`
+- `docs/normalizacion-nucleo-saas.md`
+- `docs/auth-sesiones-refresh.md`
 
 ## Licencia
 

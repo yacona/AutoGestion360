@@ -10,6 +10,7 @@
 
 const svc = require('./admin.service');
 const { isSuperAdmin } = require('../../lib/helpers');
+const { recordSecurityEventSafe, resolveRequestIp, resolveUserAgent } = require('../../lib/security/audit');
 
 // ─── helpers ────────────────────────────────────────────────
 
@@ -24,8 +25,22 @@ const wrap = (fn) => async (req, res, next) => {
   }
 };
 
-function requireSuperAdmin(req, res, next) {
+async function requireSuperAdmin(req, res, next) {
   if (!isSuperAdmin(req.user)) {
+    await recordSecurityEventSafe({
+      empresaId: req.user?.empresa_id ?? null,
+      usuarioId: req.user?.id ?? null,
+      accion: 'AUTH_ACCESS_DENIED',
+      entidad: 'auth_guard',
+      detalle: {
+        modulo: 'admin',
+        razon: 'SUPERADMIN_REQUIRED',
+        path: req.path,
+        method: req.method,
+        user_agent: resolveUserAgent(req),
+      },
+      ip: resolveRequestIp(req),
+    });
     return res.status(403).json({ error: 'Acceso denegado. Solo SuperAdmin.' });
   }
   // Sprint 4.5: log tenant-scoped superadmins during transition.

@@ -28,6 +28,11 @@ async function listar() {
     SELECT e.id, e.nombre, e.nit, e.ciudad, e.direccion, e.telefono, e.email_contacto,
            e.zona_horaria, e.licencia_tipo, e.licencia_fin,
            COALESCE(el.licencia_id, e.licencia_id) AS licencia_id,
+           p.codigo AS plan_codigo,
+           p.nombre AS plan_nombre,
+           s.estado AS suscripcion_estado,
+           s.fecha_inicio AS suscripcion_inicio,
+           COALESCE(s.fecha_fin, s.trial_hasta) AS suscripcion_fin,
            el.fecha_inicio AS licencia_asignacion_inicio,
            el.fecha_fin AS licencia_asignacion_fin,
            el.activa AS licencia_asignacion_activa,
@@ -39,6 +44,8 @@ async function listar() {
            COALESCE(p.activos,0)::int AS parqueados_activos,
            COALESCE(i.ingresos_total,0)::numeric AS ingresos_total
     FROM empresas e
+    LEFT JOIN suscripciones s ON s.empresa_id=e.id AND s.estado IN ('TRIAL','ACTIVA')
+    LEFT JOIN planes p ON p.id=s.plan_id
     LEFT JOIN empresa_licencia el ON el.empresa_id=e.id AND el.activa=true
     LEFT JOIN licencias l ON l.id=COALESCE(el.licencia_id,e.licencia_id)
     LEFT JOIN (SELECT empresa_id,COUNT(*) AS total FROM usuarios GROUP BY empresa_id) u ON u.empresa_id=e.id
@@ -54,7 +61,30 @@ async function listar() {
 async function obtener(id) {
   const { rows } = await db.query(
     `SELECT id, nombre, nit, ciudad, direccion, telefono, email_contacto,
-            zona_horaria, licencia_tipo, licencia_id, licencia_inicio, licencia_fin, activa, creado_en
+            zona_horaria, licencia_tipo, licencia_id, licencia_inicio, licencia_fin, activa, creado_en,
+            (
+              SELECT p.codigo
+              FROM suscripciones s
+              JOIN planes p ON p.id = s.plan_id
+              WHERE s.empresa_id = empresas.id AND s.estado IN ('TRIAL','ACTIVA')
+              ORDER BY s.id DESC
+              LIMIT 1
+            ) AS plan_codigo,
+            (
+              SELECT p.nombre
+              FROM suscripciones s
+              JOIN planes p ON p.id = s.plan_id
+              WHERE s.empresa_id = empresas.id AND s.estado IN ('TRIAL','ACTIVA')
+              ORDER BY s.id DESC
+              LIMIT 1
+            ) AS plan_nombre,
+            (
+              SELECT s.estado
+              FROM suscripciones s
+              WHERE s.empresa_id = empresas.id AND s.estado IN ('TRIAL','ACTIVA')
+              ORDER BY s.id DESC
+              LIMIT 1
+            ) AS suscripcion_estado
      FROM empresas WHERE id=$1`,
     [id]
   );
@@ -151,6 +181,37 @@ async function actualizar(empresaId, selfEmpresaId, body) {
      payload.activa, empresaId]
   );
   if (!rows.length) throw new AppError('Empresa no encontrada.', 404);
+
+  const touchedLegacyLicenseFields = Object.prototype.hasOwnProperty.call(body, 'licencia_tipo')
+    || Object.prototype.hasOwnProperty.call(body, 'licencia_fin');
+
+  if (touchedLegacyLicenseFields && payload.licencia_tipo) {
+    await ensureLicenciasSchema();
+    const { rows: licencias } = await db.query(
+      `SELECT id, nombre, precio
+       FROM licencias
+       WHERE LOWER(translate(nombre,'áéíóúÁÉÍÓÚ','aeiouAEIOU')) =
+             LOWER(translate($1,'áéíóúÁÉÍÓÚ','aeiouAEIOU'))
+       LIMIT 1`,
+      [payload.licencia_tipo]
+    );
+
+    if (licencias[0]) {
+      await upsertSuscripcionEmpresa({
+        empresaId,
+        licenciaId: licencias[0].id,
+        estado: String(licencias[0].nombre || '').toLowerCase() === 'demo' ? 'TRIAL' : 'ACTIVA',
+        fechaInicio: rows[0].licencia_inicio || new Date(),
+        fechaFin: payload.licencia_fin || null,
+        renovacionAutomatica: false,
+        pasarela: 'MANUAL',
+        observaciones: 'Sincronizada desde actualizacion de empresa',
+        moneda: 'COP',
+        precioPlan: licencias[0].precio,
+      });
+    }
+  }
+
   return rows[0];
 }
 

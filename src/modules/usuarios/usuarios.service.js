@@ -2,6 +2,8 @@ const bcrypt = require('bcryptjs');
 const db = require('../../../db');
 const AppError = require('../../lib/AppError');
 const { normalizeRole, isSuperAdmin, cleanText } = require('../../lib/helpers');
+const { getLicenseStatus } = require('../../../services/licenseService');
+const rbac = require('../../lib/rbac/rbac.service');
 
 function canManageUsers(user) {
   return ['superadmin', 'admin', 'administrador'].includes(normalizeRole(user?.rol));
@@ -88,6 +90,24 @@ async function crear(requestingUser, body) {
   const { rows: empresa } = await db.query('SELECT id FROM empresas WHERE id=$1', [empresaId]);
   if (!empresa.length) throw new AppError('Empresa no encontrada.', 404);
 
+  // Verificar límite de usuarios del plan
+  if (!isSuperAdmin(requestingUser)) {
+    const license = await getLicenseStatus(empresaId);
+    const maxUsuarios = license.limites?.usuarios;
+    if (maxUsuarios !== null && maxUsuarios !== undefined) {
+      const { rows: conteo } = await db.query(
+        `SELECT COUNT(*) AS total FROM usuarios WHERE empresa_id=$1 AND activo=TRUE`,
+        [empresaId]
+      );
+      if (Number(conteo[0].total) >= maxUsuarios) {
+        throw new AppError(
+          `Tu plan permite máximo ${maxUsuarios} usuario${maxUsuarios === 1 ? '' : 's'} activo${maxUsuarios === 1 ? '' : 's'}. Actualiza tu plan para agregar más.`,
+          403
+        );
+      }
+    }
+  }
+
   const hash = await bcrypt.hash(password, 10);
   const { rows } = await db.query(
     `INSERT INTO usuarios (empresa_id,nombre,email,password_hash,rol,activo)
@@ -95,6 +115,17 @@ async function crear(requestingUser, body) {
      RETURNING id, empresa_id, nombre, email, rol, activo, creado_en`,
     [empresaId, nombre, email, hash, rol, activo]
   );
+
+  // Asignar rol en tabla normalizada (sin bloquear si falla por migración pendiente)
+  const rolNorm = normalizeRole(rol);
+  const rolCodigo = ['admin', 'administrador'].includes(rolNorm) ? 'admin'
+    : rolNorm === 'operador' ? 'operador'
+    : rolNorm === 'superadmin' ? 'superadmin'
+    : 'empleado';
+  try {
+    await rbac.asignarRol(rows[0].id, rolCodigo, empresaId, requestingUser.id);
+  } catch (_) { /* migración RBAC pendiente — se ignorará */ }
+
   return rows[0];
 }
 
@@ -134,6 +165,24 @@ async function actualizar(requestingUser, userId, body) {
      RETURNING id, empresa_id, nombre, email, rol, activo, creado_en`,
     [nombre, email, rol, activo, userId]
   );
+
+  // Sincronizar rol normalizado si cambió
+  if (normalizeRole(current.rol) !== normalizeRole(rol)) {
+    const rolNorm = normalizeRole(rol);
+    const rolNuevo = ['admin', 'administrador'].includes(rolNorm) ? 'admin'
+      : rolNorm === 'operador' ? 'operador'
+      : rolNorm === 'superadmin' ? 'superadmin'
+      : 'empleado';
+    const rolAnterior = ['admin', 'administrador'].includes(normalizeRole(current.rol)) ? 'admin'
+      : normalizeRole(current.rol) === 'operador' ? 'operador'
+      : normalizeRole(current.rol) === 'superadmin' ? 'superadmin'
+      : 'empleado';
+    try {
+      await rbac.revocarRol(userId, rolAnterior, rows[0].empresa_id);
+      await rbac.asignarRol(userId, rolNuevo, rows[0].empresa_id, requestingUser.id);
+    } catch (_) { /* migración RBAC pendiente */ }
+  }
+
   return rows[0];
 }
 

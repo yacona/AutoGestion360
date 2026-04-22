@@ -46,17 +46,74 @@ CREATE UNIQUE INDEX IF NOT EXISTS empresas_nit_uniq
 
 CREATE TABLE IF NOT EXISTS usuarios (
     id              BIGSERIAL PRIMARY KEY,
-    empresa_id      BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    empresa_id      BIGINT REFERENCES empresas(id) ON DELETE CASCADE,
     nombre          VARCHAR(120) NOT NULL,
     email           VARCHAR(120) NOT NULL,
     password_hash   VARCHAR(200) NOT NULL,
     rol             VARCHAR(30) NOT NULL,
+    scope           VARCHAR(10) NOT NULL DEFAULT 'tenant',
     activo          BOOLEAN NOT NULL DEFAULT TRUE,
     creado_en       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS usuarios_empresa_email_uniq
     ON usuarios (empresa_id, email);
+
+CREATE UNIQUE INDEX IF NOT EXISTS usuarios_platform_email_uniq
+    ON usuarios (LOWER(email))
+    WHERE scope = 'platform';
+
+CREATE INDEX IF NOT EXISTS usuarios_scope_idx
+    ON usuarios (scope);
+
+ALTER TABLE usuarios
+    DROP CONSTRAINT IF EXISTS usuarios_scope_check,
+    DROP CONSTRAINT IF EXISTS usuarios_scope_empresa_check;
+
+ALTER TABLE usuarios
+    ADD CONSTRAINT usuarios_scope_check
+    CHECK (scope IN ('platform', 'tenant'));
+
+ALTER TABLE usuarios
+    ADD CONSTRAINT usuarios_scope_empresa_check
+    CHECK (scope = 'platform' OR empresa_id IS NOT NULL);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id                          BIGSERIAL PRIMARY KEY,
+    session_uid                 VARCHAR(64) NOT NULL UNIQUE,
+    user_id                     BIGINT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    empresa_id                  BIGINT REFERENCES empresas(id) ON DELETE CASCADE,
+    scope                       VARCHAR(10) NOT NULL DEFAULT 'tenant',
+    refresh_token_hash          VARCHAR(128) NOT NULL,
+    previous_refresh_token_hash VARCHAR(128),
+    user_agent                  TEXT,
+    ip_creacion                 VARCHAR(45),
+    ip_ultimo_uso               VARCHAR(45),
+    ultimo_login_en             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    ultimo_refresh_en           TIMESTAMPTZ,
+    ultima_actividad_en         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    refresh_expires_at          TIMESTAMPTZ NOT NULL,
+    revocada_en                 TIMESTAMPTZ,
+    motivo_revocacion           VARCHAR(120),
+    metadata                    JSONB,
+    creado_en                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_en              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS user_sessions_user_idx
+    ON user_sessions (user_id, creado_en DESC);
+
+CREATE INDEX IF NOT EXISTS user_sessions_empresa_idx
+    ON user_sessions (empresa_id, creado_en DESC);
+
+CREATE INDEX IF NOT EXISTS user_sessions_scope_idx
+    ON user_sessions (scope);
+
+CREATE INDEX IF NOT EXISTS user_sessions_active_idx
+    ON user_sessions (user_id, revocada_en, refresh_expires_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS user_sessions_refresh_hash_uniq
+    ON user_sessions (refresh_token_hash);
 
 
 CREATE TABLE IF NOT EXISTS clientes (
@@ -479,7 +536,7 @@ CREATE TABLE IF NOT EXISTS suscripciones (
     actualizado_en          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS suscripciones_empresa_activa_uniq
+CREATE UNIQUE INDEX IF NOT EXISTS suscripciones_activa_uniq
     ON suscripciones (empresa_id)
     WHERE estado IN ('TRIAL', 'ACTIVA');
 

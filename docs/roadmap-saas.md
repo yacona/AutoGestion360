@@ -1,6 +1,6 @@
 # Roadmap SaaS — AutoGestion360
 
-Última actualización: 2026-04-21
+Última actualización: 2026-04-22
 
 ## Norte del producto
 
@@ -21,6 +21,8 @@ Convertir AutoGestion360 en un SaaS multiempresa operable, con:
 | Sprint 3 | Completado | Hardening backend, rate limiting, validación Zod y revisión tenant |
 | Sprint 4 | Completado | Panel admin SaaS consolidado, contrato frontend/backend y lifecycle formalizado |
 | Sprint 4.5 | Completado | Separación usuarios plataforma/tenant, scope en JWT, guards por scope |
+| Sprint 4.6 | Completado | Normalización núcleo SaaS, `suscripciones` oficial y espejo legacy sincronizado |
+| Sprint 4.7 | Completado | Sesiones persistentes, refresh rotation, logout global y auditoría de autenticación |
 | Sprint 5 | Pendiente | Cobro, facturación nueva, expiración automática y operación comercial |
 | Sprint 6 | Pendiente | Observabilidad, CI/CD y despliegue |
 
@@ -168,6 +170,46 @@ Garantizar que los usuarios operativos de la plataforma (SuperAdmin, Soporte, Co
 - Enforcement estricto: rechazar `scope !== 'platform'` en el panel admin
 - Roles diferenciados de plataforma (`superadmin`, `soporte`, `comercial`)
 - Migración de superadmins existentes
+
+---
+
+## Sprint 4.6 -- Normalizacion del nucleo SaaS
+
+### Estado
+Completado.
+
+### Resultado
+
+- `suscripciones` queda como fuente oficial por defecto
+- fallback legacy pasa a ser opt-in
+- `database/001_base_schema.sql` integra soporte `platform/tenant`
+- `database/006_saas_core_normalization.sql` migra y alinea oficial + legacy
+- sincronizacion bidireccional oficial/legacy centralizada
+- alertas y listados administrativos priorizan el estado oficial
+
+### Nota operativa
+
+Las tablas legacy no se eliminan aun. Permanecen como compatibilidad temporal para endpoints y reportes que todavia no migran.
+
+---
+
+## Sprint 4.7 -- Identidad y seguridad de sesiones
+
+### Estado
+Completado.
+
+### Resultado
+
+- `user_sessions` como tabla base de sesiones
+- refresh token opaco con rotacion por uso
+- revocacion por sesion y logout global
+- access token JWT corto con `sid`
+- auditoria de login, refresh, logout y accesos denegados
+- compatibilidad mantenida para `POST /api/login`
+
+### Documentacion
+
+- `docs/auth-sesiones-refresh.md`
 
 ---
 

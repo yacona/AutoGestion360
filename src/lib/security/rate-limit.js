@@ -47,6 +47,12 @@ const loginLimiter = createLimiter({
   skipSuccessfulRequests: true,
 });
 
+const refreshLimiter = createLimiter({
+  windowMs: toNumber(process.env.RATE_LIMIT_REFRESH_WINDOW_MS, 15 * 60 * 1000),
+  max: toNumber(process.env.RATE_LIMIT_REFRESH_MAX, 20),
+  message: 'Demasiadas solicitudes de refresh token. Espera un momento e inténtalo de nuevo.',
+});
+
 const setupDemoLimiter = createLimiter({
   windowMs: toNumber(process.env.RATE_LIMIT_SETUP_DEMO_WINDOW_MS, 60 * 60 * 1000),
   max: toNumber(process.env.RATE_LIMIT_SETUP_DEMO_MAX, 3),
@@ -68,6 +74,7 @@ const adminMutationLimiter = createLimiter({
 module.exports = {
   adminMutationLimiter,
   loginLimiter,
+  refreshLimiter,
   setupDemoLimiter,
   userRegistrationLimiter,
 };

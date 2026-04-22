@@ -18,6 +18,7 @@
 const bcrypt = require('bcryptjs');
 const db = require('../db');
 const { getParqueaderoConfig } = require('../utils/parqueadero-config');
+const { syncLegacyMirrorFromSaas } = require('./saasCompatibilityService');
 const { assertEmpresaOwnedRecord, assertGlobalRecord } = require('../src/lib/tenant-scope');
 
 // ─────────────────────────────────────────────────────────────
@@ -208,6 +209,13 @@ async function onboardEmpresa(data, queryable = db) {
          renovacion_automatica, pasarela, precio_pactado, moneda, observaciones)
       VALUES ($1,$2,'TRIAL',NOW(),$3,'MENSUAL',FALSE,'MANUAL',$4,'COP','Suscripción inicial en onboarding')
     `, [empresa.id, plan.id, trialHasta, plan.precio_mensual ?? 0]);
+
+    await syncLegacyMirrorFromSaas({
+      queryable: client,
+      empresaId: empresa.id,
+      observaciones: 'Espejo legacy sincronizado desde onboarding SaaS',
+      metadata: { source: 'admin.onboardEmpresa' },
+    });
 
     // 5. Crear usuario admin
     if (adminEmail) {
@@ -436,6 +444,14 @@ async function asignarPlan(empresaId, planId, opts = {}, queryable = db) {
     `, [empresaId, planId, estado, fechaFin, trialHasta,
         ciclo, pasarela, precioFinal, moneda, observaciones]);
 
+    await syncLegacyMirrorFromSaas({
+      queryable: client,
+      empresaId,
+      suscripcionId: rows[0].id,
+      observaciones: 'Espejo legacy sincronizado desde asignacion de plan SaaS',
+      metadata: { source: 'admin.asignarPlan' },
+    });
+
     if (!isExternalClient) await client.query('COMMIT');
     return rows[0];
   } catch (err) {
@@ -457,17 +473,39 @@ async function cambiarEstadoSuscripcion(empresaId, nuevoEstado, queryable = db) 
     throw Object.assign(new Error(`Estado inválido: ${nuevoEstado}`), { statusCode: 400 });
   }
 
-  const { rows } = await queryable.query(`
-    UPDATE suscripciones
-    SET estado = $1, actualizado_en = NOW()
-    WHERE empresa_id = $2 AND estado IN ('TRIAL','ACTIVA')
-    RETURNING *
-  `, [nuevoEstado, empresaId]);
+  const isExternalClient = queryable !== db && typeof queryable.query === 'function' && !queryable.connect;
+  const client = isExternalClient ? queryable : await db.connect();
 
-  if (rows.length === 0) {
-    throw Object.assign(new Error('No hay suscripción activa para esta empresa.'), { statusCode: 404 });
+  try {
+    if (!isExternalClient) await client.query('BEGIN');
+
+    const { rows } = await client.query(`
+      UPDATE suscripciones
+      SET estado = $1, actualizado_en = NOW()
+      WHERE empresa_id = $2 AND estado IN ('TRIAL','ACTIVA')
+      RETURNING *
+    `, [nuevoEstado, empresaId]);
+
+    if (rows.length === 0) {
+      throw Object.assign(new Error('No hay suscripción activa para esta empresa.'), { statusCode: 404 });
+    }
+
+    await syncLegacyMirrorFromSaas({
+      queryable: client,
+      empresaId,
+      suscripcionId: rows[0].id,
+      observaciones: 'Espejo legacy sincronizado desde cambio de estado SaaS',
+      metadata: { source: 'admin.cambiarEstadoSuscripcion' },
+    });
+
+    if (!isExternalClient) await client.query('COMMIT');
+    return rows[0];
+  } catch (err) {
+    if (!isExternalClient) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (!isExternalClient) client.release();
   }
-  return rows[0];
 }
 
 /**
@@ -811,28 +849,50 @@ async function downgradePlan(empresaId, planId, opts = {}, queryable = db) {
 async function reactivarSuscripcion(empresaId, opts = {}, queryable = db) {
   await assertEmpresaOwnedRecord(queryable, 'empresas', empresaId, empresaId, 'Empresa no encontrada.');
 
-  const { rows } = await queryable.query(`
-    UPDATE suscripciones
-    SET estado = 'ACTIVA',
-        fecha_fin = COALESCE($2::timestamptz, fecha_fin),
-        observaciones = COALESCE($3, observaciones),
-        actualizado_en = NOW()
-    WHERE id = (
-      SELECT id FROM suscripciones
-      WHERE empresa_id = $1 AND estado IN ('SUSPENDIDA','VENCIDA')
-      ORDER BY id DESC
-      LIMIT 1
-    )
-    RETURNING *
-  `, [empresaId, opts.fechaFin || null, opts.observaciones || 'Reactivación manual']);
+  const isExternalClient = queryable !== db && typeof queryable.query === 'function' && !queryable.connect;
+  const client = isExternalClient ? queryable : await db.connect();
 
-  if (rows.length === 0) {
-    throw Object.assign(
-      new Error('No hay suscripción suspendida o vencida para reactivar.'),
-      { statusCode: 404 }
-    );
+  try {
+    if (!isExternalClient) await client.query('BEGIN');
+
+    const { rows } = await client.query(`
+      UPDATE suscripciones
+      SET estado = 'ACTIVA',
+          fecha_fin = COALESCE($2::timestamptz, fecha_fin),
+          observaciones = COALESCE($3, observaciones),
+          actualizado_en = NOW()
+      WHERE id = (
+        SELECT id FROM suscripciones
+        WHERE empresa_id = $1 AND estado IN ('SUSPENDIDA','VENCIDA')
+        ORDER BY id DESC
+        LIMIT 1
+      )
+      RETURNING *
+    `, [empresaId, opts.fechaFin || null, opts.observaciones || 'Reactivacion manual']);
+
+    if (rows.length === 0) {
+      throw Object.assign(
+        new Error('No hay suscripción suspendida o vencida para reactivar.'),
+        { statusCode: 404 }
+      );
+    }
+
+    await syncLegacyMirrorFromSaas({
+      queryable: client,
+      empresaId,
+      suscripcionId: rows[0].id,
+      observaciones: 'Espejo legacy sincronizado desde reactivacion SaaS',
+      metadata: { source: 'admin.reactivarSuscripcion' },
+    });
+
+    if (!isExternalClient) await client.query('COMMIT');
+    return rows[0];
+  } catch (err) {
+    if (!isExternalClient) await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    if (!isExternalClient) client.release();
   }
-  return rows[0];
 }
 
 module.exports = {

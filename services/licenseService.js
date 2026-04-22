@@ -6,13 +6,14 @@
  * Fuente oficial:
  *   suscripciones + planes + plan_modulos + empresa_modulos
  *
- * Compatibilidad transicional:
+ * Compatibilidad transicional solo por opt-in:
  *   empresa_licencia + licencias + licencia_modulo
  *   empresas.licencia_tipo / licencia_fin / activa
  *
  * El fallback legacy queda controlado por:
  *   ALLOW_LEGACY_LICENSE_FALLBACK=true|false
- * Si no se define, se mantiene habilitado para una transición segura.
+ * Si no se define, permanece deshabilitado para que el acceso SaaS dependa
+ * exclusivamente de suscripciones.
  */
 
 const db = require('../db');
@@ -51,6 +52,7 @@ const SQL_SAAS_STATUS = `
     p.max_usuarios,
     p.max_vehiculos,
     p.max_empleados,
+    p.max_sedes,
     COALESCE(
       (
         SELECT json_agg(
@@ -166,7 +168,7 @@ function isLegacyFallbackEnabled(options = {}) {
   if (Object.prototype.hasOwnProperty.call(options, 'allowLegacyFallback')) {
     return Boolean(options.allowLegacyFallback);
   }
-  return toBoolean(process.env.ALLOW_LEGACY_LICENSE_FALLBACK, true);
+  return toBoolean(process.env.ALLOW_LEGACY_LICENSE_FALLBACK, false);
 }
 
 function normalizeSourceList(options = {}) {
@@ -216,7 +218,7 @@ function buildBaseStatus(meta = {}) {
     licencia: null,
     modulos: [],
     modulos_detalle: [],
-    limites: { usuarios: null, vehiculos: null, empleados: null },
+    limites: { usuarios: null, vehiculos: null, empleados: null, sedes: null },
     metadata: {
       legacy_fallback_enabled: Boolean(meta.legacy_fallback_enabled),
       legacy_fallback_used: false,
@@ -258,6 +260,7 @@ function buildSaasStatus(row, meta) {
       max_usuarios: row.max_usuarios ?? null,
       max_vehiculos: row.max_vehiculos ?? null,
       max_empleados: row.max_empleados ?? null,
+      max_sedes:     row.max_sedes ?? null,
     },
     suscripcion: {
       id: row.suscripcion_id,
@@ -288,6 +291,7 @@ function buildSaasStatus(row, meta) {
       usuarios: normalizeLimit(row.max_usuarios),
       vehiculos: normalizeLimit(row.max_vehiculos),
       empleados: normalizeLimit(row.max_empleados),
+      sedes:     normalizeLimit(row.max_sedes),
     },
     metadata: {
       ...buildBaseStatus(meta).metadata,

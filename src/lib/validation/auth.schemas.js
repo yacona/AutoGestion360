@@ -12,6 +12,18 @@ const loginBodySchema = z.object({
   password: z.string().min(1, 'La contraseña es obligatoria.'),
 });
 
+const refreshBodySchema = z.object({
+  refresh_token: z.string().trim().min(1, 'El refresh token es obligatorio.'),
+});
+
+const logoutBodySchema = z.object({
+  refresh_token: z.string().trim().min(1, 'El refresh token debe ser válido.').optional(),
+}).default({});
+
+const sessionUidParamSchema = z.object({
+  sessionUid: z.string().trim().min(16, 'sessionUid inválido.').max(64, 'sessionUid inválido.'),
+});
+
 const updateEmpresaBodySchema = z.object({
   nombre: z.string().trim().min(1, 'El nombre de la empresa es obligatorio.'),
   nit: nullableTrimmedString.optional(),
@@ -24,5 +36,8 @@ const updateEmpresaBodySchema = z.object({
 
 module.exports = {
   loginBodySchema,
+  refreshBodySchema,
+  logoutBodySchema,
+  sessionUidParamSchema,
   updateEmpresaBodySchema,
 };
