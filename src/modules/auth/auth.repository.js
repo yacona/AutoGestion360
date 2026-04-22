@@ -1,16 +1,25 @@
 const db = require('../../../db');
 
+/**
+ * Busca un usuario por email.
+ * Usa LEFT JOIN para soportar usuarios de plataforma (empresa_id = NULL).
+ * Para usuarios tenant devuelve también los datos de empresa.
+ */
 async function findUserWithEmpresa(email) {
   const { rows } = await db.query(
     `SELECT u.id, u.empresa_id, u.nombre, u.email,
             u.password_hash, u.rol, u.activo,
+            u.scope,
             e.nombre AS empresa_nombre, e.logo_url, e.zona_horaria,
             e.licencia_tipo, e.licencia_id, e.licencia_fin,
             e.activa AS empresa_activa
      FROM usuarios u
-     JOIN empresas e ON e.id = u.empresa_id
+     LEFT JOIN empresas e ON e.id = u.empresa_id
      WHERE LOWER(u.email) = LOWER($1)
-     ORDER BY CASE WHEN LOWER(u.rol) IN ('superadmin','super_admin','super admin') THEN 0 ELSE 1 END, u.id
+     ORDER BY
+       CASE WHEN LOWER(u.rol) IN ('superadmin','super_admin','super admin') THEN 0 ELSE 1 END,
+       CASE WHEN u.scope = 'platform' THEN 0 ELSE 1 END,
+       u.id
      LIMIT 1`,
     [email]
   );
@@ -108,9 +117,23 @@ async function createEmpresaDemo(data) {
 
 async function createUsuario(empresaId, { nombre, email, password_hash, rol }) {
   const { rows } = await db.query(
-    `INSERT INTO usuarios (empresa_id, nombre, email, password_hash, rol)
-     VALUES ($1,$2,$3,$4,$5) RETURNING id, empresa_id, nombre, email, rol`,
+    `INSERT INTO usuarios (empresa_id, nombre, email, password_hash, rol, scope)
+     VALUES ($1,$2,$3,$4,$5,'tenant') RETURNING id, empresa_id, nombre, email, rol, scope`,
     [empresaId, nombre, email, password_hash, rol]
+  );
+  return rows[0];
+}
+
+/**
+ * Crea un usuario de plataforma (scope='platform', empresa_id=NULL).
+ * Solo para uso en scripts de bootstrapping o admin de plataforma.
+ */
+async function createPlatformUser({ nombre, email, password_hash, rol = 'SuperAdmin' }) {
+  const { rows } = await db.query(
+    `INSERT INTO usuarios (empresa_id, nombre, email, password_hash, rol, scope)
+     VALUES (NULL,$1,$2,$3,$4,'platform')
+     RETURNING id, empresa_id, nombre, email, rol, scope`,
+    [nombre, email, password_hash, rol]
   );
   return rows[0];
 }
@@ -127,4 +150,5 @@ module.exports = {
   countEmpresas,
   createEmpresaDemo,
   createUsuario,
+  createPlatformUser,
 };

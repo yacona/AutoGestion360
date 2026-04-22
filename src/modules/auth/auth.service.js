@@ -17,9 +17,23 @@ const SUPERADMIN_MODULES = [
   'empresas',
 ];
 
+/**
+ * Genera el JWT incluyendo `scope` para distinguir platform vs. tenant.
+ *
+ * Payload:
+ *   - id
+ *   - empresa_id  (null para platform users)
+ *   - scope       'platform' | 'tenant'
+ *   - rol
+ */
 function buildToken(usuario) {
   return jwt.sign(
-    { id: usuario.id, empresa_id: usuario.empresa_id, rol: usuario.rol },
+    {
+      id:         usuario.id,
+      empresa_id: usuario.empresa_id ?? null,
+      scope:      usuario.scope || 'tenant',
+      rol:        usuario.rol,
+    },
     process.env.JWT_SECRET,
     { expiresIn: '8h' }
   );
@@ -28,7 +42,7 @@ function buildToken(usuario) {
 function normalizeRole(role) {
   return String(role || '')
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[\s_-]+/g, '');
 }
@@ -90,31 +104,65 @@ function buildPermisos(status) {
   };
 }
 
+/**
+ * Login unificado para usuarios de plataforma y de tenant.
+ *
+ * PLATAFORMA (scope='platform'):
+ *   - No requiere empresa activa
+ *   - No depende de licencia/suscripción
+ *   - empresa_id = null en JWT y respuesta
+ *
+ * TENANT (scope='tenant'):
+ *   - Valida que la empresa esté activa
+ *   - Incluye datos de empresa en la respuesta
+ */
 async function login(email, password) {
   if (!email || !password) throw new ValidationError('Debe enviar email y contraseña.');
 
   const user = await repo.findUserWithEmpresa(email);
-
   if (!user) throw new UnauthorizedError('Credenciales inválidas.');
   if (!user.activo) throw new ForbiddenError('Usuario inactivo.');
-  if (!user.empresa_activa) throw new ForbiddenError('La empresa está inactiva o sin licencia.');
+
+  const isPlatform = user.scope === 'platform';
+
+  // Solo los tenant users requieren empresa activa
+  if (!isPlatform && !user.empresa_activa) {
+    throw new ForbiddenError('La empresa está inactiva o sin licencia.');
+  }
 
   const coincide = await bcrypt.compare(password, user.password_hash);
   if (!coincide) throw new UnauthorizedError('Credenciales inválidas.');
 
-  return {
-    token: buildToken(user),
-    usuario: { id: user.id, empresa_id: user.empresa_id, nombre: user.nombre, email: user.email, rol: user.rol },
-    empresa: {
-      id: user.empresa_id,
-      nombre: user.empresa_nombre,
-      logo_url: user.logo_url,
-      zona_horaria: user.zona_horaria,
-      licencia_tipo: user.licencia_tipo,
-      licencia_id: user.licencia_id,
-      licencia_fin: user.licencia_fin,
+  const token = buildToken(user);
+
+  const response = {
+    token,
+    usuario: {
+      id:         user.id,
+      empresa_id: user.empresa_id ?? null,
+      scope:      user.scope || 'tenant',
+      nombre:     user.nombre,
+      email:      user.email,
+      rol:        user.rol,
     },
   };
+
+  if (isPlatform) {
+    // Los usuarios de plataforma no tienen empresa asociada
+    response.empresa = null;
+  } else {
+    response.empresa = {
+      id:           user.empresa_id,
+      nombre:       user.empresa_nombre,
+      logo_url:     user.logo_url,
+      zona_horaria: user.zona_horaria,
+      licencia_tipo: user.licencia_tipo,
+      licencia_id:  user.licencia_id,
+      licencia_fin: user.licencia_fin,
+    };
+  }
+
+  return response;
 }
 
 async function getEmpresaLicenciaPermisos(empresaId, user = null) {
@@ -184,6 +232,9 @@ async function setupDemo() {
 
   const passwordPlano = String(process.env.SETUP_DEMO_PASSWORD || '123456');
   const hash = await bcrypt.hash(passwordPlano, 10);
+
+  // setupDemo crea un usuario tenant (asociado a la empresa demo).
+  // Para el superadmin real de plataforma usar: node scripts/create-platform-admin.js
   const usuario = await repo.createUsuario(empresa.id, {
     nombre: 'SuperAdmin Demo',
     email: 'admin@demo.com',

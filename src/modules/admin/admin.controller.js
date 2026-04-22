@@ -28,6 +28,11 @@ function requireSuperAdmin(req, res, next) {
   if (!isSuperAdmin(req.user)) {
     return res.status(403).json({ error: 'Acceso denegado. Solo SuperAdmin.' });
   }
+  // Sprint 4.5: log tenant-scoped superadmins during transition.
+  // Sprint 5 will enforce scope='platform' exclusively.
+  if (req.user.scope !== 'platform') {
+    console.warn(`[admin] SuperAdmin con scope tenant accediendo al panel: userId=${req.user.id}`);
+  }
   next();
 }
 

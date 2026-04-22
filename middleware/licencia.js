@@ -27,6 +27,12 @@ function esSuperAdmin(req) {
   return normalizarTexto(req.user?.rol) === 'superadmin';
 }
 
+// Los usuarios de plataforma nunca pertenecen a una empresa cliente,
+// por lo que no aplica la verificación de licencia de tenant.
+function esPlatformUser(req) {
+  return req.user?.scope === 'platform';
+}
+
 function moduloDeRuta(req) {
   const modulo = normalizarTexto(req.baseUrl.split('/').pop());
   return ALIAS_MODULO_RUTA[modulo] || modulo;
@@ -69,7 +75,8 @@ function crearVerificadorLicencia(moduloExplicito = null) {
     const modulo = moduloExplicito ? normalizarModuloExplicito(moduloExplicito) : moduloDeRuta(req);
 
     try {
-      if (esSuperAdmin(req)) {
+      // Usuarios de plataforma y superadmins no dependen de licencia de tenant
+      if (esSuperAdmin(req) || esPlatformUser(req)) {
         return next();
       }
 

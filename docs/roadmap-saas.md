@@ -20,6 +20,7 @@ Convertir AutoGestion360 en un SaaS multiempresa operable, con:
 | Sprint 2 | Completado | Resolución central de licencias y fallback legacy controlado |
 | Sprint 3 | Completado | Hardening backend, rate limiting, validación Zod y revisión tenant |
 | Sprint 4 | Completado | Panel admin SaaS consolidado, contrato frontend/backend y lifecycle formalizado |
+| Sprint 4.5 | Completado | Separación usuarios plataforma/tenant, scope en JWT, guards por scope |
 | Sprint 5 | Pendiente | Cobro, facturación nueva, expiración automática y operación comercial |
 | Sprint 6 | Pendiente | Observabilidad, CI/CD y despliegue |
 
@@ -134,6 +135,39 @@ planes -> plan_modulos -> suscripciones -> empresa_modulos
 - `facturas_saas`: transicional, histórica, todavía asociada al flujo legacy
 
 Ambas quedan documentadas; no son la fuente de verdad oficial del panel admin.
+
+---
+
+---
+
+## Sprint 4.5 — Separación de usuarios plataforma / tenant
+
+### Estado
+Completado.
+
+### Objetivo
+
+Garantizar que los usuarios operativos de la plataforma (SuperAdmin, Soporte, Comercial) no dependan de ninguna empresa cliente para autenticarse ni operar.
+
+### Entregables
+
+- `scope` (`'platform'` | `'tenant'`) añadido a la tabla `usuarios` (`database/005_platform_users.sql`)
+- `empresa_id` ahora nullable para usuarios de plataforma
+- `auth.repository.js`: LEFT JOIN, expone `scope`, nuevo `createPlatformUser`
+- `auth.service.js`: `scope` en JWT, login platform omite validación empresa activa
+- `middleware/auth.js`: `scope` en `req.user`
+- `middleware/licencia.js`: usuarios de plataforma bypass automático de licencia
+- `auth.controller.js`: `requireTenantScope()` bloquea platform users en rutas de empresa
+- `admin.controller.js`: `requireSuperAdmin()` loguea (warning) superadmins de scope tenant
+- `scripts/create-platform-admin.js`: bootstrap para primer usuario de plataforma
+- `scripts/promote-superadmin.js`: ahora también fija `scope='platform'` y `empresa_id=NULL`
+- Documentado en `docs/sprint-4-5-separacion-usuarios-plataforma-tenant.md`
+
+### Deuda pendiente para Sprint 5
+
+- Enforcement estricto: rechazar `scope !== 'platform'` en el panel admin
+- Roles diferenciados de plataforma (`superadmin`, `soporte`, `comercial`)
+- Migración de superadmins existentes
 
 ---
 

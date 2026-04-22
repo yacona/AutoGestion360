@@ -21,6 +21,20 @@ const upload = multer({
   limits: { fileSize: 2 * 1024 * 1024 },
 });
 
+/**
+ * Verifica que el usuario autenticado sea de scope 'tenant' y tenga empresa_id.
+ * Devuelve 403 para usuarios de plataforma que intenten usar rutas de empresa.
+ */
+function requireTenantScope(req, res) {
+  if (req.user.scope === 'platform' || !req.user.empresa_id) {
+    res.status(403).json({
+      error: 'Esta operación no está disponible para usuarios de plataforma.',
+    });
+    return false;
+  }
+  return true;
+}
+
 async function login(req, res, next) {
   try {
     const result = await service.login(req.body?.email, req.body?.password);
@@ -37,12 +51,14 @@ async function setupDemo(req, res, next) {
 
 async function getEmpresa(req, res, next) {
   try {
+    if (!requireTenantScope(req, res)) return;
     res.json(await service.getEmpresa(req.user.empresa_id));
   } catch (err) { next(err); }
 }
 
 async function updateEmpresa(req, res, next) {
   try {
+    if (!requireTenantScope(req, res)) return;
     const empresa = await service.updateEmpresa(req.user.empresa_id, req.body);
     res.json({ mensaje: 'Empresa actualizada exitosamente', empresa });
   } catch (err) { next(err); }
@@ -65,6 +81,7 @@ function uploadLogoMiddleware(req, res, next) {
 
 async function uploadLogo(req, res, next) {
   try {
+    if (!requireTenantScope(req, res)) return;
     if (!req.file) return res.status(400).json({ error: 'Archivo de logo requerido' });
     const logoUrl = `/uploads/empresa/${req.file.filename}`;
     const logo_url = await service.updateEmpresaLogo(req.user.empresa_id, logoUrl);
@@ -74,12 +91,14 @@ async function uploadLogo(req, res, next) {
 
 async function getEmpresaLicencia(req, res, next) {
   try {
+    if (!requireTenantScope(req, res)) return;
     res.json(await service.getEmpresaLicencia(req.user.empresa_id));
   } catch (err) { next(err); }
 }
 
 async function getLicenciaPermisos(req, res, next) {
   try {
+    if (!requireTenantScope(req, res)) return;
     res.json(await service.getEmpresaLicenciaPermisos(req.user.empresa_id, req.user));
   } catch (err) { next(err); }
 }
