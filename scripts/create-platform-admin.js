@@ -11,6 +11,7 @@
 require('dotenv').config();
 const bcrypt = require('bcryptjs');
 const db = require('../db');
+const rbac = require('../src/lib/rbac/rbac.service');
 
 const email    = process.env.PLATFORM_ADMIN_EMAIL    || 'platform@auto360.com';
 const password = process.env.PLATFORM_ADMIN_PASSWORD || 'changeme123';
@@ -36,6 +37,14 @@ const rol      = process.env.PLATFORM_ADMIN_ROL      || 'SuperAdmin';
      RETURNING id, empresa_id, nombre, email, rol, scope`,
     [nombre, email, hash, rol]
   );
+
+  await rbac.syncUserRoles({
+    userId: rows[0].id,
+    roleCodes: ['superadmin'],
+    empresaId: null,
+    assignedById: null,
+    scope: 'platform',
+  });
 
   console.log('Usuario de plataforma creado:');
   console.table(rows);

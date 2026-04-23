@@ -2,6 +2,7 @@ const {
   getLicenseStatus,
   isLegacyFallbackEnabled,
 } = require('../services/licenseService');
+const { isSuperAdmin } = require('../src/lib/helpers');
 
 const ALIAS_MODULO_RUTA = {
   tarifas: 'configuracion',
@@ -21,10 +22,6 @@ function normalizarTexto(valor) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
-}
-
-function esSuperAdmin(req) {
-  return normalizarTexto(req.user?.rol) === 'superadmin';
 }
 
 // Los usuarios de plataforma nunca pertenecen a una empresa cliente,
@@ -76,7 +73,7 @@ function crearVerificadorLicencia(moduloExplicito = null) {
 
     try {
       // Usuarios de plataforma y superadmins no dependen de licencia de tenant
-      if (esSuperAdmin(req) || esPlatformUser(req)) {
+      if (isSuperAdmin(req.user) || esPlatformUser(req)) {
         return next();
       }
 

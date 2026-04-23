@@ -32,6 +32,8 @@ const usuariosRoutes           = require('./modules/usuarios/usuarios.routes');
 const licenciasRoutes          = require('./modules/licencias/licencias.routes');
 const suscripcionesRoutes      = require('./modules/suscripciones/suscripciones.routes');
 const sedesRoutes              = require('./modules/sedes/sedes.routes');
+const billingRoutes            = require('./modules/billing/billing.routes');
+const billingPublicRoutes      = require('./modules/billing/billing.public.routes');
 
 // ── Módulo legacy sin migrar ──────────────────────────────────────────────────
 const reportesRoutes = require('../routes/reportes');
@@ -64,6 +66,7 @@ app.get('/api/ping', (req, res) => res.json({ mensaje: 'AutoGestión360 backend 
 
 // ── Rutas refactorizadas ──────────────────────────────────────────────────────
 app.use('/api', authRoutes);
+app.use('/api/billing', billingPublicRoutes);
 
 // Registrar /parqueadero ANTES de cualquier subruta ambigua
 app.use('/api/parqueadero', authMiddleware, licenseMiddleware('parqueadero'), parqueaderoRoutes);
@@ -91,6 +94,7 @@ app.use('/api/usuarios', authMiddleware, licenseMiddleware('usuarios'), usuarios
 app.use('/api/sedes', authMiddleware, licenseMiddleware('configuracion'), sedesRoutes);
 app.use('/api/licencias', authMiddleware, licenciasRoutes);
 app.use('/api/suscripciones', authMiddleware, suscripcionesRoutes);
+app.use('/api/billing', authMiddleware, billingRoutes);
 
 // ── Panel SuperAdmin — módulo consolidado Sprint 4 ────────────────────────────
 // authMiddleware verifica el JWT; el guard SuperAdmin vive en admin.controller.js

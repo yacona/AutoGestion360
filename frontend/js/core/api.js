@@ -1,13 +1,23 @@
 /* =========================================================
    API
-   Cliente HTTP compartido con inyeccion de token.
+   Cliente HTTP compartido con access token + refresh token.
    ========================================================= */
+
+let refreshInFlightPromise = null;
+
+function getApiBaseUrl() {
+  return window.AG360.config.apiBaseUrl || window.location.origin;
+}
+
+function shouldAttachAuthorization(options = {}) {
+  return options.withoutAuth !== true;
+}
 
 function buildApiHeaders(options = {}) {
   const headers = { ...(options.headers || {}) };
-  const token = typeof getAuthToken === "function"
+  const token = shouldAttachAuthorization(options) && typeof getAuthToken === "function"
     ? getAuthToken()
-    : window.AG360.core.storage.get(STORAGE.TOKEN, "");
+    : "";
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -30,23 +40,92 @@ function buildApiRequestOptions(options = {}) {
     delete requestOptions.headers["Content-Type"];
   }
 
+  delete requestOptions.withoutAuth;
+  delete requestOptions.skipAuthRefresh;
+
   return requestOptions;
 }
 
-async function apiFetch(path, options = {}) {
-  const baseUrl = window.AG360.config.apiBaseUrl || window.location.origin;
-  const requestOptions = buildApiRequestOptions(options);
-  const res = await fetch(`${baseUrl}${path}`, requestOptions);
-
-  if (res.status === 401) {
-    if (typeof logout === "function") logout();
-    throw new Error("No autorizado. Debe iniciar sesion.");
+async function parseApiResponse(res) {
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text().catch(() => "");
+    return text ? { message: text } : {};
   }
 
-  const data = await res.json().catch(() => ({}));
+  return res.json().catch(() => ({}));
+}
+
+async function performTokenRefresh() {
+  if (refreshInFlightPromise) {
+    return refreshInFlightPromise;
+  }
+
+  refreshInFlightPromise = (async () => {
+    const refreshToken = typeof getRefreshToken === "function" ? getRefreshToken() : "";
+    if (!refreshToken) {
+      throw new Error("No hay refresh token disponible.");
+    }
+
+    const res = await fetch(`${getApiBaseUrl()}/api/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    const data = await parseApiResponse(res);
+    if (!res.ok) {
+      throw new Error(data.error || data.message || "No se pudo renovar la sesión.");
+    }
+
+    if (typeof updateSessionTokens === "function") {
+      updateSessionTokens(data);
+    }
+
+    return data;
+  })();
+
+  try {
+    return await refreshInFlightPromise;
+  } finally {
+    refreshInFlightPromise = null;
+  }
+}
+
+async function apiFetch(path, options = {}) {
+  const requestOptions = buildApiRequestOptions(options);
+  const res = await fetch(`${getApiBaseUrl()}${path}`, requestOptions);
+
+  if (res.status === 401 && options.skipAuthRefresh !== true && shouldAttachAuthorization(options)) {
+    try {
+      await performTokenRefresh();
+      const retryOptions = buildApiRequestOptions({
+        ...options,
+        skipAuthRefresh: true,
+      });
+      const retryRes = await fetch(`${getApiBaseUrl()}${path}`, retryOptions);
+      const retryData = await parseApiResponse(retryRes);
+
+      if (!retryRes.ok) {
+        if (retryRes.status === 401 && typeof logout === "function") {
+          await logout({ skipRemote: true });
+        }
+        throw new Error(retryData.error || retryData.message || "Error en la petición");
+      }
+
+      return retryData;
+    } catch (error) {
+      if (typeof logout === "function") {
+        await logout({ skipRemote: true });
+      }
+      throw new Error(error.message || "No autorizado. Debe iniciar sesión.");
+    }
+  }
+
+  const data = await parseApiResponse(res);
 
   if (!res.ok) {
-    throw new Error(data.error || data.message || "Error en la peticion");
+    throw new Error(data.error || data.message || "Error en la petición");
   }
 
   return data;

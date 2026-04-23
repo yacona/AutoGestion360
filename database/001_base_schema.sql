@@ -115,6 +115,79 @@ CREATE INDEX IF NOT EXISTS user_sessions_active_idx
 CREATE UNIQUE INDEX IF NOT EXISTS user_sessions_refresh_hash_uniq
     ON user_sessions (refresh_token_hash);
 
+CREATE TABLE IF NOT EXISTS roles (
+    id          SERIAL PRIMARY KEY,
+    codigo      VARCHAR(50)  NOT NULL UNIQUE,
+    nombre      VARCHAR(100) NOT NULL,
+    descripcion TEXT,
+    scope       VARCHAR(10)  NOT NULL DEFAULT 'tenant',
+    es_sistema  BOOLEAN      NOT NULL DEFAULT TRUE,
+    activo      BOOLEAN      NOT NULL DEFAULT TRUE,
+    creado_en   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT roles_scope_check CHECK (scope IN ('platform', 'tenant', 'both'))
+);
+
+CREATE TABLE IF NOT EXISTS permisos (
+    id          SERIAL PRIMARY KEY,
+    codigo      VARCHAR(100) NOT NULL UNIQUE,
+    nombre      VARCHAR(120) NOT NULL,
+    descripcion TEXT,
+    modulo      VARCHAR(50),
+    accion      VARCHAR(50),
+    scope       VARCHAR(10)  NOT NULL DEFAULT 'tenant',
+    activo      BOOLEAN      NOT NULL DEFAULT TRUE,
+    creado_en   TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    CONSTRAINT permisos_scope_check CHECK (scope IN ('platform', 'tenant'))
+);
+
+CREATE INDEX IF NOT EXISTS permisos_modulo_idx
+    ON permisos (modulo);
+
+CREATE TABLE IF NOT EXISTS rol_permisos (
+    id         SERIAL PRIMARY KEY,
+    rol_id     INTEGER NOT NULL REFERENCES roles(id)    ON DELETE CASCADE,
+    permiso_id INTEGER NOT NULL REFERENCES permisos(id) ON DELETE CASCADE,
+    creado_en  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (rol_id, permiso_id)
+);
+
+CREATE INDEX IF NOT EXISTS rol_permisos_rol_idx
+    ON rol_permisos (rol_id);
+
+CREATE TABLE IF NOT EXISTS usuario_roles (
+    id           BIGSERIAL PRIMARY KEY,
+    usuario_id   BIGINT  NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    rol_id       INTEGER NOT NULL REFERENCES roles(id)    ON DELETE CASCADE,
+    empresa_id   BIGINT  REFERENCES empresas(id)          ON DELETE CASCADE,
+    asignado_por BIGINT  REFERENCES usuarios(id)          ON DELETE SET NULL,
+    creado_en    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS usuario_roles_tenant_uniq
+    ON usuario_roles (usuario_id, rol_id, empresa_id)
+    WHERE empresa_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS usuario_roles_platform_uniq
+    ON usuario_roles (usuario_id, rol_id)
+    WHERE empresa_id IS NULL;
+
+CREATE INDEX IF NOT EXISTS usuario_roles_usuario_empresa_idx
+    ON usuario_roles (usuario_id, empresa_id);
+
+CREATE TABLE IF NOT EXISTS sedes (
+    id          BIGSERIAL PRIMARY KEY,
+    empresa_id  BIGINT       NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    nombre      VARCHAR(150) NOT NULL,
+    direccion   VARCHAR(200),
+    ciudad      VARCHAR(80),
+    telefono    VARCHAR(30),
+    activa      BOOLEAN      NOT NULL DEFAULT TRUE,
+    creado_en   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS sedes_empresa_idx
+    ON sedes (empresa_id);
+
 
 CREATE TABLE IF NOT EXISTS clientes (
     id          BIGSERIAL PRIMARY KEY,
@@ -494,6 +567,7 @@ CREATE TABLE IF NOT EXISTS planes (
     max_usuarios    INTEGER,
     max_vehiculos   INTEGER,
     max_empleados   INTEGER,
+    max_sedes       INTEGER,
     es_publico      BOOLEAN NOT NULL DEFAULT TRUE,
     activo          BOOLEAN NOT NULL DEFAULT TRUE,
     orden           SMALLINT      NOT NULL DEFAULT 0,
@@ -545,6 +619,223 @@ CREATE INDEX IF NOT EXISTS suscripciones_estado_fin_idx
 
 CREATE INDEX IF NOT EXISTS suscripciones_empresa_hist_idx
     ON suscripciones (empresa_id, creado_en DESC);
+
+CREATE TABLE IF NOT EXISTS billing_invoices (
+    id                      BIGSERIAL PRIMARY KEY,
+    empresa_id              BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    suscripcion_id          BIGINT REFERENCES suscripciones(id) ON DELETE SET NULL,
+    plan_id                 INTEGER REFERENCES planes(id) ON DELETE SET NULL,
+    legacy_factura_id       BIGINT UNIQUE REFERENCES facturas_saas(id) ON DELETE SET NULL,
+    numero_factura          VARCHAR(80) NOT NULL UNIQUE,
+    tipo_documento          VARCHAR(20) NOT NULL DEFAULT 'INVOICE',
+    motivo                  VARCHAR(40) NOT NULL DEFAULT 'SUBSCRIPTION_RENEWAL',
+    estado                  VARCHAR(30) NOT NULL DEFAULT 'DRAFT',
+    collection_method       VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
+    moneda                  VARCHAR(10) NOT NULL DEFAULT 'COP',
+    subtotal                NUMERIC(14,2) NOT NULL DEFAULT 0,
+    monto_impuestos         NUMERIC(14,2) NOT NULL DEFAULT 0,
+    monto_descuento         NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total                   NUMERIC(14,2) NOT NULL DEFAULT 0,
+    saldo_pendiente         NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_pagado            NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_acreditado        NUMERIC(14,2) NOT NULL DEFAULT 0,
+    periodo_inicio          DATE,
+    periodo_fin             DATE,
+    emitida_en              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    vencimiento_en          TIMESTAMPTZ,
+    pagada_en               TIMESTAMPTZ,
+    cerrada_en              TIMESTAMPTZ,
+    pasarela                VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
+    external_customer_id    VARCHAR(150),
+    external_invoice_id     VARCHAR(150),
+    idempotency_key         VARCHAR(120),
+    metadata                JSONB,
+    created_by              BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    updated_by              BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT billing_invoices_tipo_check CHECK (tipo_documento IN ('INVOICE', 'DEBIT_NOTE')),
+    CONSTRAINT billing_invoices_motivo_check CHECK (motivo IN ('SUBSCRIPTION_RENEWAL', 'SUBSCRIPTION_REACTIVATION', 'PLAN_CHANGE', 'MANUAL_ADJUSTMENT', 'ADDON', 'LEGACY_IMPORT')),
+    CONSTRAINT billing_invoices_estado_check CHECK (estado IN ('DRAFT', 'OPEN', 'OVERDUE', 'PARTIALLY_PAID', 'PAID', 'VOID', 'UNCOLLECTIBLE', 'CREDITED', 'REFUNDED')),
+    CONSTRAINT billing_invoices_collection_check CHECK (collection_method IN ('MANUAL', 'AUTOMATIC'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_invoices_idempotency_uniq
+    ON billing_invoices (idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS billing_invoices_empresa_idx
+    ON billing_invoices (empresa_id, emitida_en DESC);
+
+CREATE INDEX IF NOT EXISTS billing_invoices_subscription_idx
+    ON billing_invoices (suscripcion_id, emitida_en DESC);
+
+CREATE INDEX IF NOT EXISTS billing_invoices_status_due_idx
+    ON billing_invoices (estado, vencimiento_en);
+
+CREATE TABLE IF NOT EXISTS billing_payment_attempts (
+    id                      BIGSERIAL PRIMARY KEY,
+    invoice_id              BIGINT NOT NULL REFERENCES billing_invoices(id) ON DELETE CASCADE,
+    empresa_id              BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    suscripcion_id          BIGINT REFERENCES suscripciones(id) ON DELETE SET NULL,
+    provider                VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
+    mode                    VARCHAR(20) NOT NULL DEFAULT 'MANUAL',
+    estado                  VARCHAR(30) NOT NULL DEFAULT 'CREATED',
+    amount                  NUMERIC(14,2) NOT NULL DEFAULT 0,
+    currency                VARCHAR(10) NOT NULL DEFAULT 'COP',
+    attempt_number          INTEGER NOT NULL DEFAULT 1,
+    idempotency_key         VARCHAR(120),
+    external_attempt_id     VARCHAR(150),
+    external_payment_id     VARCHAR(150),
+    provider_event_id       VARCHAR(150),
+    failure_code            VARCHAR(80),
+    failure_message         TEXT,
+    next_retry_at           TIMESTAMPTZ,
+    requested_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at            TIMESTAMPTZ,
+    request_payload         JSONB,
+    response_payload        JSONB,
+    metadata                JSONB,
+    created_by              BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT billing_attempts_mode_check CHECK (mode IN ('MANUAL', 'AUTOMATIC', 'WEBHOOK')),
+    CONSTRAINT billing_attempts_estado_check CHECK (estado IN ('CREATED', 'PENDING', 'PROCESSING', 'SUCCEEDED', 'FAILED', 'CANCELED', 'EXPIRED', 'IGNORED'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_attempts_idempotency_uniq
+    ON billing_payment_attempts (idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS billing_attempts_invoice_idx
+    ON billing_payment_attempts (invoice_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS billing_attempts_status_retry_idx
+    ON billing_payment_attempts (estado, next_retry_at);
+
+CREATE TABLE IF NOT EXISTS billing_payments (
+    id                      BIGSERIAL PRIMARY KEY,
+    invoice_id              BIGINT NOT NULL REFERENCES billing_invoices(id) ON DELETE CASCADE,
+    payment_attempt_id      BIGINT REFERENCES billing_payment_attempts(id) ON DELETE SET NULL,
+    empresa_id              BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    suscripcion_id          BIGINT REFERENCES suscripciones(id) ON DELETE SET NULL,
+    provider                VARCHAR(30) NOT NULL DEFAULT 'MANUAL',
+    payment_method          VARCHAR(40) NOT NULL DEFAULT 'OTRO',
+    estado                  VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED',
+    amount                  NUMERIC(14,2) NOT NULL DEFAULT 0,
+    currency                VARCHAR(10) NOT NULL DEFAULT 'COP',
+    idempotency_key         VARCHAR(120),
+    external_payment_id     VARCHAR(150),
+    referencia_externa      VARCHAR(150),
+    paid_at                 TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    metadata                JSONB,
+    created_by              BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT billing_payments_estado_check CHECK (estado IN ('CONFIRMED', 'REFUNDED', 'VOIDED', 'CHARGEBACK'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_payments_idempotency_uniq
+    ON billing_payments (idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_payments_external_uniq
+    ON billing_payments (invoice_id, external_payment_id)
+    WHERE external_payment_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS billing_payments_invoice_idx
+    ON billing_payments (invoice_id, paid_at DESC);
+
+CREATE TABLE IF NOT EXISTS billing_credit_notes (
+    id                      BIGSERIAL PRIMARY KEY,
+    credit_note_number      VARCHAR(80) NOT NULL UNIQUE,
+    invoice_id              BIGINT NOT NULL REFERENCES billing_invoices(id) ON DELETE CASCADE,
+    empresa_id              BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    suscripcion_id          BIGINT REFERENCES suscripciones(id) ON DELETE SET NULL,
+    estado                  VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+    reason_code             VARCHAR(40) NOT NULL DEFAULT 'ADJUSTMENT',
+    reason_text             TEXT,
+    currency                VARCHAR(10) NOT NULL DEFAULT 'COP',
+    subtotal                NUMERIC(14,2) NOT NULL DEFAULT 0,
+    tax_amount              NUMERIC(14,2) NOT NULL DEFAULT 0,
+    total_amount            NUMERIC(14,2) NOT NULL DEFAULT 0,
+    remaining_amount        NUMERIC(14,2) NOT NULL DEFAULT 0,
+    issued_at               TIMESTAMPTZ,
+    applied_at              TIMESTAMPTZ,
+    voided_at               TIMESTAMPTZ,
+    external_credit_note_id VARCHAR(150),
+    idempotency_key         VARCHAR(120),
+    metadata                JSONB,
+    created_by              BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    updated_by              BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT billing_credit_notes_estado_check CHECK (estado IN ('DRAFT', 'ISSUED', 'APPLIED', 'VOID'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_credit_notes_idempotency_uniq
+    ON billing_credit_notes (idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS billing_credit_notes_invoice_idx
+    ON billing_credit_notes (invoice_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS billing_webhook_events (
+    id                      BIGSERIAL PRIMARY KEY,
+    provider                VARCHAR(30) NOT NULL,
+    external_event_id       VARCHAR(150) NOT NULL,
+    event_type              VARCHAR(120),
+    signature_header        TEXT,
+    signature_valid         BOOLEAN,
+    estado                  VARCHAR(20) NOT NULL DEFAULT 'RECEIVED',
+    related_invoice_id      BIGINT REFERENCES billing_invoices(id) ON DELETE SET NULL,
+    related_attempt_id      BIGINT REFERENCES billing_payment_attempts(id) ON DELETE SET NULL,
+    process_attempts        INTEGER NOT NULL DEFAULT 0,
+    error_message           TEXT,
+    headers                 JSONB,
+    payload                 JSONB NOT NULL,
+    received_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    first_processed_at      TIMESTAMPTZ,
+    last_processed_at       TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT billing_webhook_estado_check CHECK (estado IN ('RECEIVED', 'PROCESSED', 'IGNORED', 'FAILED'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_webhook_events_provider_event_uniq
+    ON billing_webhook_events (provider, external_event_id);
+
+CREATE INDEX IF NOT EXISTS billing_webhook_events_estado_idx
+    ON billing_webhook_events (estado, received_at DESC);
+
+CREATE TABLE IF NOT EXISTS billing_customer_payment_sources (
+    id                           BIGSERIAL PRIMARY KEY,
+    empresa_id                   BIGINT NOT NULL REFERENCES empresas(id) ON DELETE CASCADE,
+    suscripcion_id               BIGINT REFERENCES suscripciones(id) ON DELETE SET NULL,
+    provider                     VARCHAR(30) NOT NULL DEFAULT 'WOMPI',
+    provider_payment_source_id   BIGINT NOT NULL,
+    customer_email               VARCHAR(255) NOT NULL,
+    type                         VARCHAR(30) NOT NULL,
+    status                       VARCHAR(30) NOT NULL DEFAULT 'ACTIVE',
+    is_default                   BOOLEAN NOT NULL DEFAULT FALSE,
+    public_data                  JSONB,
+    metadata                     JSONB,
+    created_by                   BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    updated_by                   BIGINT REFERENCES usuarios(id) ON DELETE SET NULL,
+    created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT billing_customer_payment_sources_provider_check CHECK (provider IN ('WOMPI')),
+    CONSTRAINT billing_customer_payment_sources_status_check CHECK (status IN ('ACTIVE', 'INACTIVE', 'REVOKED'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_customer_payment_sources_provider_uniq
+    ON billing_customer_payment_sources (provider, provider_payment_source_id);
+
+CREATE INDEX IF NOT EXISTS billing_customer_payment_sources_empresa_idx
+    ON billing_customer_payment_sources (empresa_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS billing_customer_payment_sources_default_uniq
+    ON billing_customer_payment_sources (empresa_id, provider)
+    WHERE is_default = TRUE AND status = 'ACTIVE';
 
 CREATE TABLE IF NOT EXISTS empresa_modulos (
     id              BIGSERIAL PRIMARY KEY,
@@ -734,25 +1025,25 @@ WHERE l.nombre = 'Premium'
 ON CONFLICT DO NOTHING;
 
 INSERT INTO planes (codigo, nombre, descripcion, precio_mensual, precio_anual, moneda, trial_dias,
-                    max_usuarios, max_vehiculos, max_empleados, es_publico, activo, orden)
+                    max_usuarios, max_vehiculos, max_empleados, max_sedes, es_publico, activo, orden)
 VALUES
     ('starter',
      'Starter',
      'Ideal para parqueaderos pequeños. Incluye parqueadero, clientes y reportes básicos.',
      49900, 479000, 'COP', 14,
-     3, 500, 5,
+     3, 500, 5, 1,
      TRUE, TRUE, 1),
     ('pro',
      'Pro',
      'Para negocios en crecimiento. Parqueadero, lavadero, taller y equipo completo.',
      99900, 959000, 'COP', 14,
-     10, NULL, NULL,
+     10, NULL, NULL, 3,
      TRUE, TRUE, 2),
     ('enterprise',
      'Enterprise',
      'Plataforma completa con administración multiempresa y módulos ilimitados.',
      199900, 1919000, 'COP', 30,
-     NULL, NULL, NULL,
+     NULL, NULL, NULL, NULL,
      TRUE, TRUE, 3)
 ON CONFLICT (codigo) DO UPDATE
     SET nombre = EXCLUDED.nombre,
@@ -763,6 +1054,7 @@ ON CONFLICT (codigo) DO UPDATE
         max_usuarios = EXCLUDED.max_usuarios,
         max_vehiculos = EXCLUDED.max_vehiculos,
         max_empleados = EXCLUDED.max_empleados,
+        max_sedes = EXCLUDED.max_sedes,
         activo = EXCLUDED.activo,
         actualizado_en = NOW();
 
@@ -804,6 +1096,130 @@ WHERE p.codigo = 'enterprise'
 ON CONFLICT (plan_id, modulo_id) DO UPDATE
     SET limite_registros = EXCLUDED.limite_registros,
         activo = EXCLUDED.activo;
+
+INSERT INTO roles (codigo, nombre, descripcion, scope, es_sistema, activo) VALUES
+    ('superadmin', 'Super Administrador', 'Acceso total a plataforma y tenants.', 'both', TRUE, TRUE),
+    ('admin',      'Administrador',       'Gestión completa de operaciones dentro del tenant.', 'tenant', TRUE, TRUE),
+    ('operador',   'Operador',            'Operaciones de entrada, salida y atención.', 'tenant', TRUE, TRUE),
+    ('empleado',   'Empleado',            'Acceso básico a servicios operativos.', 'tenant', TRUE, TRUE)
+ON CONFLICT (codigo) DO UPDATE
+    SET nombre = EXCLUDED.nombre,
+        descripcion = EXCLUDED.descripcion,
+        scope = EXCLUDED.scope,
+        activo = EXCLUDED.activo;
+
+INSERT INTO permisos (codigo, nombre, modulo, accion, scope) VALUES
+    ('clientes:ver',       'Ver clientes',       'clientes',       'ver',      'tenant'),
+    ('clientes:crear',     'Crear clientes',     'clientes',       'crear',    'tenant'),
+    ('clientes:editar',    'Editar clientes',    'clientes',       'editar',   'tenant'),
+    ('clientes:eliminar',  'Eliminar clientes',  'clientes',       'eliminar', 'tenant'),
+    ('vehiculos:ver',      'Ver vehículos',      'vehiculos',      'ver',      'tenant'),
+    ('vehiculos:crear',    'Crear vehículos',    'vehiculos',      'crear',    'tenant'),
+    ('vehiculos:editar',   'Editar vehículos',   'vehiculos',      'editar',   'tenant'),
+    ('empleados:ver',      'Ver empleados',      'empleados',      'ver',      'tenant'),
+    ('empleados:crear',    'Crear empleados',    'empleados',      'crear',    'tenant'),
+    ('empleados:editar',   'Editar empleados',   'empleados',      'editar',   'tenant'),
+    ('empleados:eliminar', 'Eliminar empleados', 'empleados',      'eliminar', 'tenant'),
+    ('parqueadero:ver',    'Ver parqueadero',    'parqueadero',    'ver',      'tenant'),
+    ('parqueadero:crear',  'Registrar entrada',  'parqueadero',    'crear',    'tenant'),
+    ('parqueadero:editar', 'Editar registro',    'parqueadero',    'editar',   'tenant'),
+    ('lavadero:ver',       'Ver lavadero',       'lavadero',       'ver',      'tenant'),
+    ('lavadero:crear',     'Crear servicio',     'lavadero',       'crear',    'tenant'),
+    ('lavadero:editar',    'Editar servicio',    'lavadero',       'editar',   'tenant'),
+    ('taller:ver',         'Ver taller',         'taller',         'ver',      'tenant'),
+    ('taller:crear',       'Crear orden',        'taller',         'crear',    'tenant'),
+    ('taller:editar',      'Editar orden',       'taller',         'editar',   'tenant'),
+    ('ordenes:ver',        'Ver órdenes',        'ordenes',        'ver',      'tenant'),
+    ('ordenes:crear',      'Crear órdenes',      'ordenes',        'crear',    'tenant'),
+    ('ordenes:editar',     'Editar órdenes',     'ordenes',        'editar',   'tenant'),
+    ('ordenes:cancelar',   'Cancelar órdenes',   'ordenes',        'cancelar', 'tenant'),
+    ('reportes:ver',       'Ver reportes',       'reportes',       'ver',      'tenant'),
+    ('reportes:exportar',  'Exportar reportes',  'reportes',       'exportar', 'tenant'),
+    ('usuarios:ver',       'Ver usuarios',       'usuarios',       'ver',      'tenant'),
+    ('usuarios:crear',     'Crear usuarios',     'usuarios',       'crear',    'tenant'),
+    ('usuarios:editar',    'Editar usuarios',    'usuarios',       'editar',   'tenant'),
+    ('usuarios:eliminar',  'Eliminar usuarios',  'usuarios',       'eliminar', 'tenant'),
+    ('configuracion:ver',    'Ver configuración',    'configuracion', 'ver',    'tenant'),
+    ('configuracion:editar', 'Editar configuración', 'configuracion', 'editar', 'tenant'),
+    ('sedes:ver',      'Ver sedes',      'sedes', 'ver',      'tenant'),
+    ('sedes:crear',    'Crear sedes',    'sedes', 'crear',    'tenant'),
+    ('sedes:editar',   'Editar sedes',   'sedes', 'editar',   'tenant'),
+    ('sedes:eliminar', 'Eliminar sedes', 'sedes', 'eliminar', 'tenant'),
+    ('platform:empresas:ver',           'Ver empresas (plataforma)',      'empresas',      'ver',       'platform'),
+    ('platform:empresas:crear',         'Crear empresas (plataforma)',    'empresas',      'crear',     'platform'),
+    ('platform:empresas:editar',        'Editar empresas (plataforma)',   'empresas',      'editar',    'platform'),
+    ('platform:billing:ver',            'Ver billing SaaS',               'billing',       'ver',       'platform'),
+    ('platform:billing:gestionar',      'Gestionar billing SaaS',         'billing',       'gestionar', 'platform'),
+    ('platform:suscripciones:gestionar','Gestionar suscripciones',        'suscripciones', 'gestionar', 'platform'),
+    ('platform:planes:gestionar',       'Gestionar planes',               'planes',        'gestionar', 'platform'),
+    ('platform:usuarios:gestionar',     'Gestionar usuarios plataforma',  'usuarios',      'gestionar', 'platform')
+ON CONFLICT (codigo) DO NOTHING;
+
+INSERT INTO rol_permisos (rol_id, permiso_id)
+SELECT r.id, p.id
+FROM roles r, permisos p
+WHERE r.codigo = 'admin'
+  AND p.scope = 'tenant'
+ON CONFLICT (rol_id, permiso_id) DO NOTHING;
+
+INSERT INTO rol_permisos (rol_id, permiso_id)
+SELECT r.id, p.id
+FROM roles r, permisos p
+WHERE r.codigo = 'operador'
+  AND p.codigo IN (
+      'clientes:ver', 'clientes:crear', 'clientes:editar',
+      'vehiculos:ver', 'vehiculos:crear',
+      'ordenes:ver', 'ordenes:crear', 'ordenes:editar',
+      'parqueadero:ver', 'parqueadero:crear',
+      'lavadero:ver', 'lavadero:crear',
+      'taller:ver', 'taller:crear',
+      'reportes:ver'
+  )
+ON CONFLICT (rol_id, permiso_id) DO NOTHING;
+
+INSERT INTO rol_permisos (rol_id, permiso_id)
+SELECT r.id, p.id
+FROM roles r, permisos p
+WHERE r.codigo = 'empleado'
+  AND p.codigo IN (
+      'parqueadero:ver', 'parqueadero:crear',
+      'lavadero:ver', 'lavadero:crear',
+      'taller:ver', 'taller:crear',
+      'reportes:ver'
+  )
+ON CONFLICT (rol_id, permiso_id) DO NOTHING;
+
+INSERT INTO rol_permisos (rol_id, permiso_id)
+SELECT r.id, p.id
+FROM roles r, permisos p
+WHERE r.codigo = 'superadmin'
+  AND p.scope = 'platform'
+ON CONFLICT (rol_id, permiso_id) DO NOTHING;
+
+INSERT INTO usuario_roles (usuario_id, rol_id, empresa_id)
+SELECT
+    u.id,
+    r.id,
+    CASE WHEN u.scope = 'platform' THEN NULL ELSE u.empresa_id END
+FROM usuarios u
+JOIN roles r ON r.codigo = CASE
+    WHEN u.scope = 'platform'
+      OR LOWER(REGEXP_REPLACE(translate(COALESCE(u.rol, ''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'), '[\s_-]+', '', 'g')) = 'superadmin'
+    THEN 'superadmin'
+    WHEN LOWER(REGEXP_REPLACE(translate(COALESCE(u.rol, ''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'), '[\s_-]+', '', 'g')) IN ('admin', 'administrador')
+    THEN 'admin'
+    WHEN LOWER(REGEXP_REPLACE(translate(COALESCE(u.rol, ''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'), '[\s_-]+', '', 'g')) = 'operador'
+    THEN 'operador'
+    ELSE 'empleado'
+END
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM usuario_roles ur
+    WHERE ur.usuario_id = u.id
+      AND ur.empresa_id IS NOT DISTINCT FROM
+          (CASE WHEN u.scope = 'platform' THEN NULL ELSE u.empresa_id END)
+)
+ON CONFLICT DO NOTHING;
 
 INSERT INTO suscripciones (
     empresa_id, plan_id, estado, fecha_inicio, fecha_fin,

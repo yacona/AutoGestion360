@@ -783,7 +783,7 @@ async function getLimitesEfectivos(empresaId, queryable = db) {
   const { rows: planRows } = await queryable.query(`
     SELECT
       p.id AS plan_id, p.codigo AS plan_codigo, p.nombre AS plan_nombre,
-      p.max_usuarios, p.max_vehiculos, p.max_empleados,
+      p.max_usuarios, p.max_vehiculos, p.max_empleados, p.max_sedes,
       s.estado AS suscripcion_estado, s.fecha_fin, s.trial_hasta
     FROM suscripciones s
     JOIN planes p ON p.id = s.plan_id
@@ -800,6 +800,7 @@ async function getLimitesEfectivos(empresaId, queryable = db) {
       max_usuarios:  plan?.max_usuarios  ?? null,
       max_vehiculos: plan?.max_vehiculos ?? null,
       max_empleados: plan?.max_empleados ?? null,
+      max_sedes:     plan?.max_sedes     ?? null,
     },
     modulos: modulos.map((m) => ({
       id:              m.id,

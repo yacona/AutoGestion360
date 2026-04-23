@@ -201,10 +201,18 @@ function initModuleCatalog() {
 }
 
 function setConfigTab(tab = "empresa") {
-  const selectedTab = tab || "empresa";
+  const requestedTab = tab || "empresa";
+  const isPlatformUser = getCurrentUser()?.scope === "platform";
+  const targetButton = document.querySelector(`.config-tab[data-config-tab="${requestedTab}"]`);
+  const fallbackTab = isPlatformUser ? "sesiones" : "empresa";
+  const selectedTab = targetButton?.dataset.tenantOnly === "true" && isPlatformUser
+    ? fallbackTab
+    : requestedTab;
 
   document.querySelectorAll(".config-tab").forEach((button) => {
     const active = button.dataset.configTab === selectedTab;
+    const tenantOnly = button.dataset.tenantOnly === "true";
+    button.classList.toggle("hidden", tenantOnly && isPlatformUser);
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", active ? "true" : "false");
   });
@@ -212,7 +220,8 @@ function setConfigTab(tab = "empresa") {
   document.querySelectorAll("[data-config-panel]").forEach((panel) => {
     const samePanel = panel.dataset.configPanel === selectedTab;
     const adminOnly = panel.dataset.adminOnly === "true";
-    panel.classList.toggle("hidden", !samePanel || (adminOnly && !userIsSuperAdmin()));
+    const tenantOnly = panel.dataset.tenantOnly === "true";
+    panel.classList.toggle("hidden", !samePanel || (adminOnly && !userIsSuperAdmin()) || (tenantOnly && isPlatformUser));
   });
 
   if (selectedTab === "parqueadero" && typeof loadParqueaderoConfig === "function") {
@@ -220,6 +229,9 @@ function setConfigTab(tab = "empresa") {
   }
   if (selectedTab === "licencias" && typeof loadLicenciaInfo === "function") {
     loadLicenciaInfo();
+  }
+  if (selectedTab === "sesiones" && typeof loadUserSessions === "function") {
+    loadUserSessions();
   }
 }
 

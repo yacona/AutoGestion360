@@ -3,7 +3,7 @@
 const db = require('../../../db');
 const AppError = require('../../lib/AppError');
 const { isSuperAdmin, cleanText } = require('../../lib/helpers');
-const { getLicenseStatus } = require('../../../services/licenseService');
+const { assertCanCreateSede } = require('../../lib/plan-limits.service');
 
 function getEmpresaId(requestingUser, bodyEmpresaId) {
   if (isSuperAdmin(requestingUser)) {
@@ -76,22 +76,7 @@ async function crear(requestingUser, body) {
   if (!empresa.length) throw new AppError('Empresa no encontrada.', 404);
 
   // Verificar límite de sedes del plan
-  if (!isSuperAdmin(requestingUser)) {
-    const license = await getLicenseStatus(empresaId);
-    const maxSedes = license.limites?.sedes;
-    if (maxSedes !== null && maxSedes !== undefined) {
-      const { rows: conteo } = await db.query(
-        `SELECT COUNT(*) AS total FROM sedes WHERE empresa_id=$1 AND activa=TRUE`,
-        [empresaId]
-      );
-      if (Number(conteo[0].total) >= maxSedes) {
-        throw new AppError(
-          `Tu plan permite máximo ${maxSedes} sede${maxSedes === 1 ? '' : 's'} activa${maxSedes === 1 ? '' : 's'}. Actualiza tu plan para agregar más.`,
-          403
-        );
-      }
-    }
-  }
+  await assertCanCreateSede(empresaId);
 
   const { rows } = await db.query(
     `INSERT INTO sedes (empresa_id, nombre, direccion, ciudad, telefono)
@@ -126,21 +111,8 @@ async function cambiarEstado(requestingUser, sedeId, activa) {
   const sede = await obtener(requestingUser, sedeId);
 
   // Verificar límite de sedes al reactivar
-  if (activa && !isSuperAdmin(requestingUser)) {
-    const license = await getLicenseStatus(sede.empresa_id);
-    const maxSedes = license.limites?.sedes;
-    if (maxSedes !== null && maxSedes !== undefined) {
-      const { rows: conteo } = await db.query(
-        `SELECT COUNT(*) AS total FROM sedes WHERE empresa_id=$1 AND activa=TRUE`,
-        [sede.empresa_id]
-      );
-      if (Number(conteo[0].total) >= maxSedes) {
-        throw new AppError(
-          `Tu plan permite máximo ${maxSedes} sede${maxSedes === 1 ? '' : 's'} activa${maxSedes === 1 ? '' : 's'}.`,
-          403
-        );
-      }
-    }
+  if (activa) {
+    await assertCanCreateSede(sede.empresa_id);
   }
 
   const { rows } = await db.query(

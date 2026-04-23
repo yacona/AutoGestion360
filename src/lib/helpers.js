@@ -9,10 +9,19 @@ function normalizeRole(role) {
 }
 
 function isSuperAdmin(user) {
+  if (Array.isArray(user?.roles) && user.roles.some((role) => normalizeRole(role) === 'superadmin')) {
+    return true;
+  }
   return normalizeRole(user?.rol) === 'superadmin';
 }
 
 function canManageUsers(user) {
+  if (Array.isArray(user?.permisos) && (user.permisos.includes('*') || user.permisos.includes('usuarios:editar') || user.permisos.includes('platform:usuarios:gestionar'))) {
+    return true;
+  }
+  if (Array.isArray(user?.roles) && user.roles.some((role) => ['superadmin', 'admin'].includes(normalizeRole(role)))) {
+    return true;
+  }
   return ['superadmin', 'admin', 'administrador'].includes(normalizeRole(user?.rol));
 }
 

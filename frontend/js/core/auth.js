@@ -1,6 +1,6 @@
 /* =========================================================
    AUTH
-   Sesion, usuario actual y permisos de licencia.
+   Sesion, usuario actual, refresh token y permisos de licencia.
    ========================================================= */
 
 let licensePermissionsState = {
@@ -14,21 +14,68 @@ function getAuthToken() {
   return window.AG360.core.storage.get(STORAGE.TOKEN, "");
 }
 
-function persistAuthSession({ token = "", email = "", empresa = {}, usuario = {} } = {}) {
-  window.AG360.core.storage.set(STORAGE.TOKEN, token || "");
-  window.AG360.core.storage.set(STORAGE.EMAIL, email || "");
+function getRefreshToken() {
+  return window.AG360.core.storage.get(STORAGE.REFRESH_TOKEN, "");
+}
+
+function getSessionId() {
+  return window.AG360.core.storage.get(STORAGE.SESSION_ID, "");
+}
+
+function hasActiveSession() {
+  return Boolean(getAuthToken() && getRefreshToken());
+}
+
+function persistAuthSession({
+  token = "",
+  access_token = "",
+  refresh_token = "",
+  session = {},
+  email = "",
+  empresa = {},
+  usuario = {},
+} = {}) {
+  const accessToken = access_token || token || "";
+  window.AG360.core.storage.set(STORAGE.TOKEN, accessToken);
+  window.AG360.core.storage.set(STORAGE.REFRESH_TOKEN, refresh_token || "");
+  window.AG360.core.storage.set(STORAGE.SESSION_ID, session?.id || "");
+  window.AG360.core.storage.set(STORAGE.EMAIL, email || usuario?.email || "");
   window.AG360.core.storage.set(STORAGE.EMPRESA, empresa?.nombre || "");
   window.AG360.core.storage.set("empresa_logo", empresa?.logo_url || "");
-  window.AG360.core.storage.set("user_info", JSON.stringify(usuario || {}));
+  window.AG360.core.storage.setJSON("user_info", usuario || {});
+}
+
+function updateSessionTokens(data = {}) {
+  const currentUser = getCurrentUser();
+  const currentCompanyName = window.AG360.core.storage.get(STORAGE.EMPRESA, "");
+  const currentLogo = window.AG360.core.storage.get("empresa_logo", "");
+
+  persistAuthSession({
+    token: data.token,
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+    session: data.session,
+    email: data.usuario?.email || currentUser.email || window.AG360.core.storage.get(STORAGE.EMAIL, ""),
+    empresa: data.empresa || { nombre: currentCompanyName, logo_url: currentLogo },
+    usuario: {
+      ...currentUser,
+      ...(data.usuario || {}),
+    },
+  });
+
+  updateCurrentSessionHint();
 }
 
 function clearAuthSession() {
   window.AG360.core.storage.remove(STORAGE.TOKEN);
+  window.AG360.core.storage.remove(STORAGE.REFRESH_TOKEN);
+  window.AG360.core.storage.remove(STORAGE.SESSION_ID);
   window.AG360.core.storage.remove(STORAGE.EMAIL);
   window.AG360.core.storage.remove(STORAGE.EMPRESA);
   window.AG360.core.storage.remove(STORAGE.LICENSE);
   window.AG360.core.storage.remove("empresa_logo");
   window.AG360.core.storage.remove("user_info");
+  updateCurrentSessionHint();
 }
 
 function getCurrentUser() {
@@ -97,9 +144,22 @@ function restoreCachedLicensePermissions() {
 }
 
 async function loadLicensePermissions() {
+  const user = getCurrentUser();
+  if (user.scope === "platform") {
+    licensePermissionsState = {
+      loaded: true,
+      modules: null,
+      license: null,
+      expired: false,
+    };
+    window.AG360.core.storage.remove(STORAGE.LICENSE);
+    return null;
+  }
+
   try {
     const data = await apiFetch("/api/empresa/licencia/permisos");
     setLicensePermissions(data);
+    return data;
   } catch (error) {
     console.warn("No se pudieron cargar permisos de licencia:", error);
     if (!restoreCachedLicensePermissions()) {
@@ -110,6 +170,7 @@ async function loadLicensePermissions() {
         expired: false,
       };
     }
+    return null;
   }
 }
 
@@ -149,6 +210,16 @@ function showMainView() {
   document.getElementById("main-view")?.classList.remove("hidden");
 }
 
+function updateCurrentSessionHint() {
+  const sessionBadge = document.getElementById("session-current-badge");
+  if (!sessionBadge) return;
+
+  const sessionId = getSessionId();
+  sessionBadge.textContent = sessionId
+    ? `Sesion actual: ${sessionId.slice(0, 8)}...`
+    : "Sesion actual";
+}
+
 async function initAfterLogin() {
   const empresa = window.AG360.core.storage.get(STORAGE.EMPRESA, "");
   if (empresa) {
@@ -164,6 +235,7 @@ async function initAfterLogin() {
 
   const empresaLogo = window.AG360.core.storage.get("empresa_logo", "");
   updateSidebarLogo(empresaLogo, empresa);
+  updateCurrentSessionHint();
 
   if (!licensePermissionsState.loaded) {
     await loadLicensePermissions();
@@ -193,11 +265,15 @@ async function handleLogin(event) {
   try {
     const data = await apiFetch("/api/login", {
       method: "POST",
+      withoutAuth: true,
       body: JSON.stringify({ email, password }),
     });
 
     persistAuthSession({
       token: data.token,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+      session: data.session,
       email,
       empresa: data.empresa,
       usuario: data.usuario,
@@ -205,6 +281,8 @@ async function handleLogin(event) {
 
     if (data.licencia) {
       setLicensePermissions(data.licencia);
+    } else {
+      await loadLicensePermissions();
     }
 
     showMainView();
@@ -218,7 +296,19 @@ async function handleLogin(event) {
   }
 }
 
-function logout() {
+async function logout({ skipRemote = false } = {}) {
+  if (!skipRemote && getAuthToken()) {
+    try {
+      await apiFetch("/api/logout", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: getRefreshToken() || undefined }),
+        skipAuthRefresh: true,
+      });
+    } catch (error) {
+      console.warn("No se pudo cerrar la sesión remotamente:", error);
+    }
+  }
+
   clearAuthSession();
   licensePermissionsState = {
     loaded: false,
@@ -226,12 +316,17 @@ function logout() {
     license: null,
     expired: false,
   };
+
   showLoginView();
 }
 
 window.AG360.core.auth = {
   getAuthToken,
+  getRefreshToken,
+  getSessionId,
+  hasActiveSession,
   persistAuthSession,
+  updateSessionTokens,
   clearAuthSession,
   getCurrentUser,
   userIsSuperAdmin,
@@ -244,4 +339,5 @@ window.AG360.core.auth = {
   initAfterLogin,
   handleLogin,
   logout,
+  updateCurrentSessionHint,
 };

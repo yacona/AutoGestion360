@@ -9,6 +9,7 @@
  */
 require('dotenv').config();
 const db = require('../db');
+const rbac = require('../src/lib/rbac/rbac.service');
 
 const email = process.argv[2];
 
@@ -30,6 +31,14 @@ if (!email) {
     console.error(`No se encontró ningún usuario con email "${email}".`);
     process.exit(1);
   }
+
+  await rbac.syncUserRoles({
+    userId: rows[0].id,
+    roleCodes: ['superadmin'],
+    empresaId: null,
+    assignedById: null,
+    scope: 'platform',
+  });
 
   console.log('Usuario promovido a SuperAdmin de plataforma:');
   console.table(rows);

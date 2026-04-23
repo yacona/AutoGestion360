@@ -257,21 +257,21 @@ JOIN roles r ON r.codigo = CASE
     WHEN u.scope = 'platform'
       OR LOWER(
            REGEXP_REPLACE(
-             UNACCENT(COALESCE(u.rol, '')),
+             translate(COALESCE(u.rol, ''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'),
              '[\s_-]+', '', 'g'
            )
          ) = 'superadmin'
     THEN 'superadmin'
     WHEN LOWER(
            REGEXP_REPLACE(
-             UNACCENT(COALESCE(u.rol, '')),
+             translate(COALESCE(u.rol, ''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'),
              '[\s_-]+', '', 'g'
            )
          ) IN ('admin', 'administrador')
     THEN 'admin'
     WHEN LOWER(
            REGEXP_REPLACE(
-             UNACCENT(COALESCE(u.rol, '')),
+             translate(COALESCE(u.rol, ''), 'áéíóúÁÉÍÓÚ', 'aeiouAEIOU'),
              '[\s_-]+', '', 'g'
            )
          ) = 'operador'

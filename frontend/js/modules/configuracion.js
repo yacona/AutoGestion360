@@ -35,7 +35,30 @@ function updateConfigOverview(empresa = {}, permisos = null) {
 }
 
 async function loadConfig() {
+  const currentUser = getCurrentUser();
+  const isPlatformUser = currentUser.scope === "platform";
+
   try {
+    if (isPlatformUser) {
+      updateConfigOverview({
+        nombre: "Plataforma",
+        email_contacto: currentUser.email || "Sin contacto",
+        ciudad: "Multiempresa",
+      }, null);
+
+      setElementText("config-summary-plan", "Platform");
+      setElementText("config-summary-modulos", "Acceso administrativo");
+      setElementText("config-summary-vigencia", "Sin vencimiento");
+      setElementText("empresa-identidad-nombre", currentUser.nombre || "Usuario de plataforma");
+      setElementText("empresa-identidad-contacto", currentUser.email || "Sin contacto");
+      setElementText("empresa-identidad-ciudad", "Scope platform");
+      updateCurrentSessionHint();
+
+      const activeTab = document.querySelector(".config-tab.active")?.dataset.configTab;
+      setConfigTab(activeTab || "sesiones");
+      return;
+    }
+
     const empresa = await apiFetch("/api/empresa");
     document.getElementById("empresa-nombre").value = empresa.nombre || "";
     document.getElementById("empresa-nit").value = empresa.nit || "";
@@ -56,6 +79,193 @@ async function loadConfig() {
   } catch (error) {
     console.error("Error cargando configuración:", error);
     showError("Error al cargar la configuración");
+  }
+}
+
+// ── Sesiones ──────────────────────────────────────────────
+
+function formatSessionDate(value) {
+  return value ? formatDateTime(value) : "Sin registro";
+}
+
+function formatSessionExpiry(value) {
+  if (!value) return "Sin vencimiento";
+
+  const expiresAt = new Date(value);
+  if (Number.isNaN(expiresAt.getTime())) return "Sin vencimiento";
+
+  if (expiresAt.getTime() <= Date.now()) {
+    return "Expirada";
+  }
+
+  return formatDateTime(value);
+}
+
+function getSessionStatusLabel(session = {}) {
+  if (session.revocada_en) return "Revocada";
+
+  const refreshExpiresAt = new Date(session.refresh_expires_at || "");
+  if (Number.isFinite(refreshExpiresAt.getTime()) && refreshExpiresAt.getTime() <= Date.now()) {
+    return "Expirada";
+  }
+
+  return session.actual ? "Actual" : "Activa";
+}
+
+function getSessionDeviceLabel(userAgent = "") {
+  const normalized = String(userAgent || "").toLowerCase();
+  if (!normalized) return "Dispositivo no identificado";
+  if (normalized.includes("iphone")) return "iPhone";
+  if (normalized.includes("ipad")) return "iPad";
+  if (normalized.includes("android")) return "Android";
+  if (normalized.includes("mac os") || normalized.includes("macintosh")) return "macOS";
+  if (normalized.includes("windows")) return "Windows";
+  if (normalized.includes("linux")) return "Linux";
+  return "Navegador web";
+}
+
+function resetSessionsFeedback() {
+  const errorBox = document.getElementById("sesiones-error");
+  const successBox = document.getElementById("sesiones-success");
+  if (errorBox) errorBox.hidden = true;
+  if (successBox) successBox.hidden = true;
+}
+
+function renderSessionsList(sessions = []) {
+  const container = document.getElementById("sesiones-lista");
+  if (!container) return;
+
+  updateCurrentSessionHint();
+
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    container.innerHTML = `
+      <div class="session-empty-state">
+        <strong>No hay sesiones activas registradas.</strong>
+        <span>Cuando inicies sesion desde otro dispositivo apareceran aqui.</span>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = sessions.map((session) => {
+    const statusLabel = getSessionStatusLabel(session);
+    const deviceLabel = getSessionDeviceLabel(session.user_agent);
+    const currentBadge = session.actual
+      ? '<span class="badge badge-primary">Sesion actual</span>'
+      : "";
+    const revokeButton = session.actual
+      ? '<button type="button" class="btn btn-outline" data-session-action="logout-current">Cerrar esta sesion</button>'
+      : `<button type="button" class="btn btn-outline" data-session-action="revoke" data-session-id="${escapeHtml(session.id)}">Cerrar sesion</button>`;
+
+    return `
+      <article class="session-card${session.actual ? " session-card-current" : ""}">
+        <div class="session-card-header">
+          <div>
+            <strong>${deviceLabel}</strong>
+            <span class="small-text">ID ${escapeHtml(String(session.id || "").slice(0, 12))}${String(session.id || "").length > 12 ? "..." : ""}</span>
+          </div>
+          <div class="session-badges">
+            ${currentBadge}
+            <span class="${getBadgeClass(statusLabel)}">${statusLabel}</span>
+          </div>
+        </div>
+        <div class="session-card-body">
+          <div class="session-meta-grid">
+            <div>
+              <span>Ultima actividad</span>
+              <strong>${escapeHtml(formatSessionDate(session.ultima_actividad_en || session.ultimo_refresh_en || session.ultimo_login_en))}</strong>
+            </div>
+            <div>
+              <span>Refresh vence</span>
+              <strong>${escapeHtml(formatSessionExpiry(session.refresh_expires_at))}</strong>
+            </div>
+            <div>
+              <span>IP creacion</span>
+              <strong>${escapeHtml(session.ip_creacion || "No registrada")}</strong>
+            </div>
+            <div>
+              <span>IP ultimo uso</span>
+              <strong>${escapeHtml(session.ip_ultimo_uso || "No registrada")}</strong>
+            </div>
+          </div>
+          <div class="session-agent">
+            <span class="small-text">${escapeHtml(session.user_agent || "Sin user-agent registrado")}</span>
+          </div>
+        </div>
+        <div class="session-card-actions">
+          ${revokeButton}
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+async function loadUserSessions() {
+  const container = document.getElementById("sesiones-lista");
+  if (container) {
+    container.innerHTML = '<div class="session-empty-state"><strong>Cargando sesiones...</strong><span>Consultando dispositivos y actividad reciente.</span></div>';
+  }
+
+  resetSessionsFeedback();
+
+  try {
+    const sessions = await apiFetch("/api/sesiones");
+    renderSessionsList(sessions);
+  } catch (error) {
+    console.error("Error cargando sesiones:", error);
+    if (container) {
+      container.innerHTML = `
+        <div class="session-empty-state">
+          <strong>No fue posible cargar las sesiones.</strong>
+          <span>Intenta nuevamente en unos segundos.</span>
+        </div>
+      `;
+    }
+    showError(error.message || "Error al cargar sesiones", "sesiones-error");
+  }
+}
+
+async function handleCerrarSesionRemota(sessionUid) {
+  if (!sessionUid) return;
+  if (!confirm("Se cerrara la sesion seleccionada en ese dispositivo. Deseas continuar?")) return;
+
+  resetSessionsFeedback();
+
+  try {
+    await apiFetch(`/api/sesiones/${encodeURIComponent(sessionUid)}`, {
+      method: "DELETE",
+    });
+    showSuccess("Sesion cerrada correctamente", "sesiones-success");
+
+    if (sessionUid === getSessionId()) {
+      await logout({ skipRemote: true });
+      return;
+    }
+
+    await loadUserSessions();
+  } catch (error) {
+    showError(error.message || "No fue posible cerrar la sesion", "sesiones-error");
+  }
+}
+
+async function handleCerrarSesionActual() {
+  if (!confirm("Se cerrara la sesion actual en este navegador. Deseas continuar?")) return;
+  await logout();
+}
+
+async function handleCerrarTodasLasSesiones() {
+  if (!confirm("Se cerraran todas las sesiones activas, incluida la actual. Deseas continuar?")) return;
+
+  resetSessionsFeedback();
+
+  try {
+    await apiFetch("/api/logout-all", {
+      method: "POST",
+    });
+    showSuccess("Todas las sesiones fueron cerradas", "sesiones-success");
+    await logout({ skipRemote: true });
+  } catch (error) {
+    showError(error.message || "No fue posible cerrar todas las sesiones", "sesiones-error");
   }
 }
 
@@ -468,6 +678,21 @@ function bindConfiguracionEvents() {
   document.getElementById("empresa-logo-file")?.addEventListener("change", handleLogoFileChange);
   document.getElementById("form-parqueadero-config")?.addEventListener("submit", handleGuardarParqueaderoConfig);
   document.getElementById("btn-toggle-parqueadero-config")?.addEventListener("click", toggleParqueaderoConfig);
+  document.getElementById("btn-refresh-sesiones")?.addEventListener("click", loadUserSessions);
+  document.getElementById("btn-logout-all-sesiones")?.addEventListener("click", handleCerrarTodasLasSesiones);
+  document.getElementById("sesiones-lista")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-session-action]");
+    if (!button) return;
+
+    if (button.dataset.sessionAction === "revoke") {
+      handleCerrarSesionRemota(button.dataset.sessionId);
+      return;
+    }
+
+    if (button.dataset.sessionAction === "logout-current") {
+      handleCerrarSesionActual();
+    }
+  });
   document.querySelectorAll(".config-tab").forEach((button) => {
     button.addEventListener("click", () => setConfigTab(button.dataset.configTab));
   });
@@ -485,3 +710,5 @@ window.AG360.registerModule({
   bindEvents: bindConfiguracionEvents,
   onEnter: loadConfig,
 });
+
+window.loadUserSessions = loadUserSessions;

@@ -5,6 +5,8 @@
 
 const STORAGE = {
   TOKEN: "ag360_token",
+  REFRESH_TOKEN: "ag360_refresh_token",
+  SESSION_ID: "ag360_session_id",
   EMAIL: "ag360_user_email",
   EMPRESA: "ag360_empresa_nombre",
   LICENSE: "ag360_license_permissions",

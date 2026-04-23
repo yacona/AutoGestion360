@@ -15,6 +15,227 @@
   --sidebar-width: 260px;
 }
 
+.billing-hero-card,
+.billing-toolbar-card,
+.billing-merchant-card,
+.billing-detail-card,
+.billing-creation-card,
+.billing-company-card,
+.billing-detail-panel,
+.billing-activity-panel {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.96) 0%, rgba(17, 24, 39, 0.9) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 22px;
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.16);
+}
+
+.billing-summary-grid,
+.billing-merchant-grid,
+.billing-detail-grid,
+.billing-detail-panels,
+.billing-activity-grid,
+.billing-toolbar-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.billing-summary-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.billing-merchant-grid,
+.billing-detail-grid,
+.billing-activity-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.billing-toolbar-grid {
+  align-items: end;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.billing-detail-panels {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  margin-top: 1.25rem;
+}
+
+.billing-summary-item,
+.billing-merchant-panel,
+.billing-detail-metric {
+  background: rgba(15, 23, 42, 0.38);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  padding: 1rem 1.1rem;
+}
+
+.billing-summary-item span,
+.billing-merchant-panel span,
+.billing-detail-metric span {
+  color: rgba(226, 232, 240, 0.78);
+  display: block;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.35rem;
+  text-transform: uppercase;
+}
+
+.billing-summary-item strong,
+.billing-merchant-panel strong,
+.billing-detail-metric strong {
+  color: #f8fafc;
+  display: block;
+  font-size: 1.18rem;
+  font-weight: 700;
+}
+
+.billing-toolbar-actions,
+.billing-inline-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.billing-merchant-tokens {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.billing-ledger-hero {
+  background: rgba(15, 23, 42, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 18px;
+  margin-bottom: 1rem;
+  padding: 1rem 1.1rem;
+}
+
+.billing-ledger-hero h4 {
+  margin-bottom: 0.4rem;
+}
+
+.billing-source-list,
+.billing-activity-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.billing-source-item,
+.billing-activity-item,
+.billing-checkout-preview {
+  align-items: center;
+  background: rgba(15, 23, 42, 0.32);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 16px;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  padding: 0.95rem 1rem;
+}
+
+.billing-source-item strong,
+.billing-activity-item strong,
+.billing-checkout-preview strong {
+  color: #f8fafc;
+  display: block;
+}
+
+.billing-source-meta,
+.billing-activity-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  justify-content: flex-end;
+}
+
+.billing-source-empty,
+.billing-activity-empty {
+  background: rgba(15, 23, 42, 0.22);
+  border: 1px dashed rgba(148, 163, 184, 0.26);
+  border-radius: 16px;
+  color: rgba(226, 232, 240, 0.8);
+  display: grid;
+  gap: 0.2rem;
+  padding: 1rem 1.1rem;
+}
+
+.billing-checkout-launcher.hidden {
+  display: none;
+}
+
+.billing-checkout-form,
+.billing-sync-form {
+  display: inline-flex;
+}
+
+.billing-row-selected {
+  background: rgba(59, 130, 246, 0.14);
+}
+
+body.light-theme .billing-hero-card,
+body.light-theme .billing-toolbar-card,
+body.light-theme .billing-merchant-card,
+body.light-theme .billing-detail-card,
+body.light-theme .billing-creation-card,
+body.light-theme .billing-company-card,
+body.light-theme .billing-detail-panel,
+body.light-theme .billing-activity-panel {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.96) 100%);
+  border-color: rgba(148, 163, 184, 0.22);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+body.light-theme .billing-summary-item,
+body.light-theme .billing-merchant-panel,
+body.light-theme .billing-detail-metric,
+body.light-theme .billing-ledger-hero,
+body.light-theme .billing-source-item,
+body.light-theme .billing-activity-item,
+body.light-theme .billing-checkout-preview {
+  background: rgba(255, 255, 255, 0.88);
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+body.light-theme .billing-summary-item span,
+body.light-theme .billing-merchant-panel span,
+body.light-theme .billing-detail-metric span,
+body.light-theme .billing-source-empty,
+body.light-theme .billing-activity-empty {
+  color: rgba(71, 85, 105, 0.84);
+}
+
+body.light-theme .billing-summary-item strong,
+body.light-theme .billing-merchant-panel strong,
+body.light-theme .billing-detail-metric strong,
+body.light-theme .billing-source-item strong,
+body.light-theme .billing-activity-item strong,
+body.light-theme .billing-checkout-preview strong {
+  color: #0f172a;
+}
+
+@media (max-width: 920px) {
+  .billing-toolbar-actions,
+  .billing-inline-actions,
+  .billing-source-item,
+  .billing-activity-item,
+  .billing-checkout-preview,
+  .billing-source-meta,
+  .billing-activity-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .billing-checkout-form {
+    width: 100%;
+  }
+
+  .billing-checkout-form .btn,
+  .billing-source-item .btn {
+    width: 100%;
+  }
+}
+
 /* GLOBAL */
 
 *,
@@ -2032,7 +2253,7 @@ body.theme-light .ring-bg {
 
 .config-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
   gap: 0.65rem;
   width: 100%;
   grid-column: 2;
@@ -2228,6 +2449,132 @@ body.theme-light .config-tab.active {
 body.theme-light .theme-option:hover,
 body.theme-light .theme-option.active {
   background: rgba(21, 128, 61, 0.08);
+}
+
+.session-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(59, 130, 246, 0.16);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.06);
+}
+
+.session-toolbar-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.session-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+.session-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.session-card,
+.session-empty-state {
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.34);
+}
+
+.session-card {
+  padding: 1rem;
+}
+
+.session-card-current {
+  border-color: rgba(37, 99, 235, 0.42);
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15);
+}
+
+.session-card-header,
+.session-card-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.session-card-header strong {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--text-main);
+}
+
+.session-card-body {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 0.9rem;
+}
+
+.session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.session-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.session-meta-grid > div {
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.session-meta-grid span {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.session-meta-grid strong {
+  color: var(--text-main);
+  font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.session-agent {
+  padding: 0.8rem 0.9rem;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.42);
+  border: 1px dashed rgba(148, 163, 184, 0.2);
+}
+
+.session-empty-state {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  text-align: center;
+}
+
+body.theme-light .session-card,
+body.theme-light .session-empty-state {
+  background: #ffffff;
+  border-color: var(--border-soft);
+}
+
+body.theme-light .session-toolbar,
+body.theme-light .session-meta-grid > div,
+body.theme-light .session-agent {
+  background: rgba(37, 99, 235, 0.04);
 }
 
 /* Configuración parqueadero */
@@ -2684,6 +3031,21 @@ body.theme-light .theme-option.active {
     width: 100%;
     grid-column: auto;
     grid-row: auto;
+  }
+
+  .session-toolbar,
+  .session-card-header,
+  .session-card-actions {
+    flex-direction: column;
+  }
+
+  .session-toolbar-actions,
+  .session-badges {
+    justify-content: flex-start;
+  }
+
+  .session-meta-grid {
+    grid-template-columns: 1fr;
   }
 
   .theme-options {
@@ -3731,6 +4093,11 @@ body.theme-light .theme-option.active {
   .config-panel-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .session-toolbar-actions .btn,
+  .session-card-actions .btn {
+    width: 100%;
   }
 
   .company-summary-grid {

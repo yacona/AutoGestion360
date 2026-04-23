@@ -97,7 +97,7 @@ function buildSaasAccessResolution(status) {
       legacy_fallback_used: false,
       modulos: [],
       modulos_detalle: [],
-      limites: { usuarios: null, vehiculos: null, empleados: null },
+      limites: { usuarios: null, vehiculos: null, empleados: null, sedes: null },
       plan: null,
       suscripcion: null,
     };
@@ -111,7 +111,7 @@ function buildSaasAccessResolution(status) {
     legacy_fallback_used: status.metadata?.legacy_fallback_used === true,
     modulos: status.modulos || [],
     modulos_detalle: status.modulos_detalle || [],
-    limites: status.limites || { usuarios: null, vehiculos: null, empleados: null },
+    limites: status.limites || { usuarios: null, vehiculos: null, empleados: null, sedes: null },
     plan: status.plan || null,
     suscripcion: status.suscripcion || null,
   };

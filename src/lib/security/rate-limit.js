@@ -71,8 +71,15 @@ const adminMutationLimiter = createLimiter({
   message: 'Demasiadas operaciones administrativas en un periodo corto. Espera un momento e intenta nuevamente.',
 });
 
+const billingWebhookLimiter = createLimiter({
+  windowMs: toNumber(process.env.RATE_LIMIT_BILLING_WEBHOOK_WINDOW_MS, 60 * 1000),
+  max: toNumber(process.env.RATE_LIMIT_BILLING_WEBHOOK_MAX, 120),
+  message: 'Demasiados webhooks de billing en un periodo corto. Intenta nuevamente más tarde.',
+});
+
 module.exports = {
   adminMutationLimiter,
+  billingWebhookLimiter,
   loginLimiter,
   refreshLimiter,
   setupDemoLimiter,

@@ -3,6 +3,7 @@ const db = require('../../../db');
 const AppError = require('../../lib/AppError');
 const withTransaction = require('../../lib/withTransaction');
 const { cleanText } = require('../../lib/helpers');
+const rbac = require('../../lib/rbac/rbac.service');
 const { getParqueaderoConfig } = require('../../../utils/parqueadero-config');
 const { ensureLicenciasSchema } = require('../../../utils/licencias-schema');
 const { upsertSuscripcionEmpresa } = require('../../../utils/suscripciones-schema');
@@ -135,10 +136,23 @@ async function crear(body) {
 
     if (adminEmail) {
       const hash = await bcrypt.hash(adminPassword, 10);
-      await client.query(
-        `INSERT INTO usuarios (empresa_id,nombre,email,password_hash,rol) VALUES ($1,$2,$3,$4,$5)`,
+      const { rows: createdAdmins } = await client.query(
+        `INSERT INTO usuarios (empresa_id,nombre,email,password_hash,rol)
+         VALUES ($1,$2,$3,$4,$5)
+         RETURNING id`,
         [empresa.id, adminNombre || `Admin ${empresa.nombre}`, adminEmail, hash, 'Administrador']
       );
+      const adminId = createdAdmins?.[0]?.id;
+      if (adminId) {
+        await rbac.syncUserRoles({
+          userId: adminId,
+          roleCodes: ['admin'],
+          empresaId: empresa.id,
+          assignedById: null,
+          scope: 'tenant',
+          client,
+        });
+      }
     }
 
     await getParqueaderoConfig(empresa.id, client);

@@ -57,7 +57,7 @@ async function bootstrap() {
   initModuleCatalog();
   bindRegisteredModules();
 
-  if (getAuthToken()) {
+  if (hasActiveSession()) {
     showMainView();
     await initAfterLogin();
     return;

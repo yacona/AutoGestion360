@@ -17,21 +17,18 @@
 
 const { getLicenseStatus } = require('../services/licenseService');
 const rbac = require('../src/lib/rbac/rbac.service');
+const {
+  FALLBACK_PERMISSIONS_BY_ROLE,
+  getFallbackPermissionsForRole,
+} = require('../src/lib/rbac/rbac.fallback');
+const { isSuperAdmin } = require('../src/lib/helpers');
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────
 
-function normalizeRol(valor) {
-  return String(valor || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
 function esSuperAdmin(req) {
-  return normalizeRol(req.user?.rol) === 'superadmin';
+  return isSuperAdmin(req.user);
 }
 
 // Mensajes de error por estado de suscripción
@@ -131,51 +128,13 @@ function requireModule(codigoModulo) {
 //   2. Cargar en login y adjuntar a req.user.permisos
 //   3. Este middleware revisa req.user.permisos primero.
 //
-const PERMISOS_POR_ROL = {
-  superadmin: ['*'],
-
-  admin: [
-    'clientes:crear',    'clientes:editar',    'clientes:eliminar',
-    'vehiculos:crear',   'vehiculos:editar',
-    'empleados:crear',   'empleados:editar',   'empleados:eliminar',
-    'ordenes:crear',     'ordenes:editar',     'ordenes:cancelar',
-    'parqueadero:crear', 'parqueadero:editar',
-    'lavadero:crear',    'lavadero:editar',
-    'taller:crear',      'taller:editar',
-    'reportes:ver',      'reportes:exportar',
-    'usuarios:crear',    'usuarios:editar',
-    'configuracion:editar',
-  ],
-
-  // Admin y Administrador son equivalentes
-  administrador: null, // se resuelve como 'admin' en getPermisos()
-
-  operador: [
-    'clientes:crear',    'clientes:editar',
-    'vehiculos:crear',
-    'ordenes:crear',     'ordenes:editar',
-    'parqueadero:crear',
-    'lavadero:crear',
-    'taller:crear',
-    'reportes:ver',
-  ],
-
-  empleado: [
-    'parqueadero:crear',
-    'lavadero:crear',
-    'taller:crear',
-    'reportes:ver',
-  ],
-};
+const PERMISOS_POR_ROL = FALLBACK_PERMISSIONS_BY_ROLE;
 
 /**
  * Devuelve la lista de permisos para un rol dado.
  */
 function getPermisosParaRol(rol) {
-  const key = normalizeRol(rol);
-  // administrador es alias de admin
-  const resolved = key === 'administrador' ? 'admin' : key;
-  return PERMISOS_POR_ROL[resolved] ?? PERMISOS_POR_ROL.empleado;
+  return getFallbackPermissionsForRole(rol);
 }
 
 /**
@@ -194,10 +153,9 @@ function requirePermission(permiso) {
     try {
       // Caché a nivel de request: evita múltiples consultas en un mismo ciclo
       if (!req._rbac_permisos) {
-        req._rbac_permisos = await rbac.getPermisosFromDB(
-          req.user.id,
-          req.user.empresa_id ?? null
-        );
+        req._rbac_permisos = Array.isArray(req.user?.permisos) && req.user.permisos.length > 0
+          ? req.user.permisos
+          : await rbac.getPermisosFromDB(req.user.id, req.user.empresa_id ?? null);
       }
 
       const lista = req._rbac_permisos;

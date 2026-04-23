@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../../../db');
 const repo = require('./auth.repository');
 const withTransaction = require('../../lib/withTransaction');
+const rbac = require('../../lib/rbac/rbac.service');
 const { getLicenseStatus, isLegacyFallbackEnabled } = require('../../../services/licenseService');
 const { recordSecurityEventSafe } = require('../../lib/security/audit');
 const {
@@ -130,7 +131,7 @@ function buildSessionPayload(session) {
   };
 }
 
-function buildAuthResponse(user, accessTokenData, refreshToken, session) {
+function buildAuthResponse(user, accessTokenData, refreshToken, session, accessContext = {}) {
   const isPlatform = user.scope === 'platform';
 
   const response = {
@@ -149,6 +150,8 @@ function buildAuthResponse(user, accessTokenData, refreshToken, session) {
       nombre: user.nombre,
       email: user.email,
       rol: user.rol,
+      roles: accessContext.roles || [],
+      permisos: accessContext.permisos || [],
     },
   };
 
@@ -372,11 +375,14 @@ async function login(email, password, context = {}) {
       detalle: { scope: freshUser.scope || 'tenant' },
     });
 
+    const accessContext = await rbac.getAccessContext(freshUser, freshUser.empresa_id ?? null);
+
     return buildAuthResponse(
       freshUser,
       sessionBundle.accessTokenData,
       sessionBundle.refreshToken,
-      sessionBundle.session
+      sessionBundle.session,
+      accessContext
     );
   });
 
@@ -516,6 +522,7 @@ async function refreshSession(refreshToken, context = {}) {
 
     const nextRefreshToken = serializeRefreshToken(sessionUid, newRefreshSecret);
     const accessTokenData = buildAccessToken(user, sessionUid);
+    const accessContext = await rbac.getAccessContext(user, user.empresa_id ?? null);
 
     await client.query('COMMIT');
 
@@ -527,7 +534,7 @@ async function refreshSession(refreshToken, context = {}) {
       userAgent: context.userAgent || null,
     });
 
-    return buildAuthResponse(user, accessTokenData, nextRefreshToken, rotatedSession);
+    return buildAuthResponse(user, accessTokenData, nextRefreshToken, rotatedSession, accessContext);
   } catch (error) {
     try {
       await client.query('ROLLBACK');
@@ -723,6 +730,14 @@ async function setupDemo() {
     email: 'admin@demo.com',
     password_hash: hash,
     rol: 'SuperAdmin',
+  });
+
+  await rbac.syncUserRoles({
+    userId: usuario.id,
+    roleCodes: ['superadmin'],
+    empresaId: empresa.id,
+    assignedById: null,
+    scope: 'tenant',
   });
 
   return { empresa, usuario, credenciales_demo: { email: usuario.email, password: passwordPlano } };

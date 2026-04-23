@@ -1,6 +1,7 @@
 // middleware/auth.js
 const repo = require('../src/modules/auth/auth.repository');
 const { ACCESS_TOKEN_TYPE, verifyAccessToken } = require('../src/modules/auth/auth.service');
+const rbac = require('../src/lib/rbac/rbac.service');
 const {
   recordSecurityEventSafe,
   resolveRequestIp,
@@ -135,7 +136,7 @@ async function authMiddleware(req, res, next) {
       await repo.touchSessionActivity(sessionUid, resolveRequestIp(req));
     }
 
-    req.user = {
+    const authUser = {
       id: decoded.id,
       empresa_id: decoded.empresa_id ?? null,
       scope: decoded.scope || 'tenant',
@@ -144,6 +145,16 @@ async function authMiddleware(req, res, next) {
       token_type: tokenType,
       legacy_token: verification.legacy === true,
     };
+
+    const accessContext = await rbac.getAccessContext(authUser, authUser.empresa_id);
+
+    req.user = {
+      ...authUser,
+      roles: accessContext.roles,
+      permisos: accessContext.permisos,
+    };
+
+    req._rbac_permisos = accessContext.permisos;
 
     return next();
   } catch (err) {

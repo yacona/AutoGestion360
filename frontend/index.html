@@ -19,6 +19,7 @@
   <script defer src="js/modules/clientes.js"></script>
   <script defer src="js/modules/empleados.js"></script>
   <script defer src="js/modules/empresas.js"></script>
+  <script defer src="js/modules/billing.js"></script>
   <script defer src="js/modules/usuarios.js"></script>
   <script defer src="js/modules/configuracion.js"></script>
   <script defer src="js/modules/reportes.js"></script>
@@ -2550,6 +2551,424 @@
           </div>
         </section>
 
+        <section id="view-billing" class="view">
+          <div class="cards-grid">
+            <div class="card card-full billing-hero-card">
+              <div>
+                <span class="eyebrow">Operacion comercial</span>
+                <h3>Billing SaaS</h3>
+                <p class="small-text">Administra facturas, recaudo, checkout Wompi y medios de pago recurrentes desde una sola consola.</p>
+              </div>
+              <div class="billing-summary-grid">
+                <div class="billing-summary-item">
+                  <span class="stat-label">Facturas abiertas</span>
+                  <strong id="billing-summary-open" class="stat-value">0</strong>
+                </div>
+                <div class="billing-summary-item">
+                  <span class="stat-label">Vencidas</span>
+                  <strong id="billing-summary-overdue" class="stat-value">0</strong>
+                </div>
+                <div class="billing-summary-item">
+                  <span class="stat-label">Pagadas</span>
+                  <strong id="billing-summary-paid" class="stat-value">0</strong>
+                </div>
+                <div class="billing-summary-item">
+                  <span class="stat-label">Saldo pendiente</span>
+                  <strong id="billing-summary-balance" class="stat-value">$0</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-full billing-toolbar-card">
+              <div class="billing-toolbar-grid">
+                <div class="form-group">
+                  <label for="billing-filter-company">Empresa</label>
+                  <select id="billing-filter-company"></select>
+                </div>
+                <div class="form-group">
+                  <label for="billing-filter-status">Estado factura</label>
+                  <select id="billing-filter-status">
+                    <option value="">Todas</option>
+                    <option value="OPEN">OPEN</option>
+                    <option value="OVERDUE">OVERDUE</option>
+                    <option value="PARTIALLY_PAID">PARTIALLY_PAID</option>
+                    <option value="PAID">PAID</option>
+                    <option value="VOID">VOID</option>
+                    <option value="CREDITED">CREDITED</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="billing-filter-limit">Lote</label>
+                  <select id="billing-filter-limit">
+                    <option value="20">20</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+                <div class="billing-toolbar-actions">
+                  <button type="button" id="btn-billing-refresh" class="btn btn-secondary">Actualizar</button>
+                  <button type="button" id="btn-billing-renewal" class="btn btn-outline">Crear renovacion</button>
+                </div>
+              </div>
+              <div id="billing-main-msg" class="small-message" hidden></div>
+            </div>
+
+            <div class="card card-full billing-merchant-card">
+              <div class="list-heading">
+                <div>
+                  <span class="eyebrow">Wompi sandbox</span>
+                  <h3>Estado de integracion</h3>
+                  <p class="small-text">Consulta la configuracion activa del comercio y los tokens de aceptacion necesarios para tokenizacion.</p>
+                </div>
+                <div class="billing-inline-actions">
+                  <span id="billing-merchant-status" class="badge badge-muted">Sin validar</span>
+                  <button type="button" id="btn-billing-merchant-refresh" class="btn btn-outline">Revalidar</button>
+                </div>
+              </div>
+              <div class="billing-merchant-grid">
+                <div class="billing-merchant-panel">
+                  <span>Ambiente</span>
+                  <strong id="billing-merchant-env">-</strong>
+                </div>
+                <div class="billing-merchant-panel">
+                  <span>Llave publica</span>
+                  <strong id="billing-merchant-key">-</strong>
+                </div>
+                <div class="billing-merchant-panel">
+                  <span>Checkout URL</span>
+                  <strong id="billing-merchant-checkout-url">-</strong>
+                </div>
+                <div class="billing-merchant-panel">
+                  <span>Redirect URL</span>
+                  <strong id="billing-merchant-redirect-url">-</strong>
+                </div>
+              </div>
+              <div class="billing-merchant-tokens">
+                <div class="form-group">
+                  <label for="billing-merchant-acceptance-token">Acceptance token</label>
+                  <textarea id="billing-merchant-acceptance-token" rows="2" readonly></textarea>
+                </div>
+                <div class="form-group">
+                  <label for="billing-merchant-personal-auth">Personal data auth</label>
+                  <textarea id="billing-merchant-personal-auth" rows="2" readonly></textarea>
+                </div>
+              </div>
+              <div id="billing-merchant-msg" class="small-message" hidden></div>
+            </div>
+
+            <div class="card billing-creation-card">
+              <div class="form-card-heading">
+                <div>
+                  <h3>Crear factura</h3>
+                  <p class="small-text">Genera una factura oficial para la empresa seleccionada o prepara una renovacion formal.</p>
+                </div>
+              </div>
+              <form id="form-billing-invoice-create">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="billing-create-company">Empresa *</label>
+                    <select id="billing-create-company" required></select>
+                  </div>
+                  <div class="form-group">
+                    <label for="billing-create-reason">Motivo *</label>
+                    <select id="billing-create-reason">
+                      <option value="MANUAL_ADJUSTMENT">MANUAL_ADJUSTMENT</option>
+                      <option value="SUBSCRIPTION_RENEWAL">SUBSCRIPTION_RENEWAL</option>
+                      <option value="SUBSCRIPTION_REACTIVATION">SUBSCRIPTION_REACTIVATION</option>
+                      <option value="PLAN_CHANGE">PLAN_CHANGE</option>
+                      <option value="ADDON">ADDON</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="billing-create-number">Numero factura</label>
+                    <input type="text" id="billing-create-number" placeholder="AUTO" />
+                  </div>
+                  <div class="form-group">
+                    <label for="billing-create-method">Metodo de cobro</label>
+                    <select id="billing-create-method">
+                      <option value="MANUAL">MANUAL</option>
+                      <option value="AUTOMATIC">AUTOMATIC</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="billing-create-subtotal">Subtotal *</label>
+                    <input type="number" id="billing-create-subtotal" min="0" step="100" required />
+                  </div>
+                  <div class="form-group">
+                    <label for="billing-create-tax">Impuestos</label>
+                    <input type="number" id="billing-create-tax" min="0" step="100" value="0" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="billing-create-discount">Descuento</label>
+                    <input type="number" id="billing-create-discount" min="0" step="100" value="0" />
+                  </div>
+                  <div class="form-group">
+                    <label for="billing-create-total">Total</label>
+                    <input type="number" id="billing-create-total" min="0" step="100" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="billing-create-period-start">Periodo inicio</label>
+                    <input type="date" id="billing-create-period-start" />
+                  </div>
+                  <div class="form-group">
+                    <label for="billing-create-period-end">Periodo fin</label>
+                    <input type="date" id="billing-create-period-end" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="billing-create-due-date">Vencimiento</label>
+                    <input type="date" id="billing-create-due-date" />
+                  </div>
+                  <div class="form-group">
+                    <label for="billing-create-gateway">Pasarela</label>
+                    <select id="billing-create-gateway">
+                      <option value="MANUAL">MANUAL</option>
+                      <option value="WOMPI">WOMPI</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-actions">
+                  <button type="submit" class="btn btn-primary">Crear factura</button>
+                </div>
+                <div id="billing-create-msg" class="small-message" hidden></div>
+              </form>
+            </div>
+
+            <div class="card billing-company-card">
+              <div class="form-card-heading">
+                <div>
+                  <h3>Ledger por empresa</h3>
+                  <p class="small-text">Consulta la suscripcion activa, las facturas recientes y el estado comercial del tenant seleccionado.</p>
+                </div>
+              </div>
+              <div class="billing-ledger-hero">
+                <div>
+                  <span class="stat-label">Empresa</span>
+                  <strong id="billing-ledger-company">Sin seleccion</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Plan</span>
+                  <strong id="billing-ledger-plan">-</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Estado</span>
+                  <strong id="billing-ledger-status">-</strong>
+                </div>
+                <div>
+                  <span class="stat-label">Vigencia</span>
+                  <strong id="billing-ledger-end">-</strong>
+                </div>
+              </div>
+              <div id="billing-ledger-msg" class="small-message" hidden></div>
+              <div id="billing-payment-sources" class="billing-source-list"></div>
+            </div>
+
+            <div class="card card-expand">
+              <div class="list-heading">
+                <div>
+                  <h3>Facturas oficiales</h3>
+                  <p class="small-text">Selecciona una factura para operar pagos manuales, checkout y sincronizacion con Wompi.</p>
+                </div>
+                <span id="billing-invoices-count" class="badge badge-muted">0 registros</span>
+              </div>
+              <div class="table-wrapper">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Factura</th>
+                      <th>Empresa</th>
+                      <th>Motivo</th>
+                      <th>Total</th>
+                      <th>Saldo</th>
+                      <th>Estado</th>
+                      <th>Pasarela</th>
+                      <th>Accion</th>
+                    </tr>
+                  </thead>
+                  <tbody id="billing-invoices-tbody"></tbody>
+                </table>
+                <div id="billing-invoices-empty" class="table-empty">No hay facturas para el filtro actual.</div>
+              </div>
+            </div>
+
+            <div class="card card-full billing-detail-card">
+              <div class="form-card-heading">
+                <div>
+                  <span class="eyebrow">Factura seleccionada</span>
+                  <h3 id="billing-detail-title">Sin seleccion</h3>
+                  <p id="billing-detail-subtitle" class="small-text">Selecciona una factura para ver intentos, pagos y activar checkout.</p>
+                </div>
+                <span id="billing-detail-status" class="badge badge-muted">-</span>
+              </div>
+
+              <div class="billing-detail-grid">
+                <div class="billing-detail-metric">
+                  <span>Total</span>
+                  <strong id="billing-detail-total">$0</strong>
+                </div>
+                <div class="billing-detail-metric">
+                  <span>Saldo</span>
+                  <strong id="billing-detail-balance">$0</strong>
+                </div>
+                <div class="billing-detail-metric">
+                  <span>Pagado</span>
+                  <strong id="billing-detail-paid">$0</strong>
+                </div>
+                <div class="billing-detail-metric">
+                  <span>Vence</span>
+                  <strong id="billing-detail-due">-</strong>
+                </div>
+              </div>
+
+              <div class="billing-detail-panels">
+                <div class="billing-detail-panel">
+                  <div class="list-heading">
+                    <div>
+                      <h3>Pago manual</h3>
+                      <p class="small-text">Registra recaudo confirmado en caja o por transferencia.</p>
+                    </div>
+                  </div>
+                  <form id="form-billing-manual-payment">
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="billing-payment-amount">Monto</label>
+                        <input type="number" id="billing-payment-amount" min="0" step="100" />
+                      </div>
+                      <div class="form-group">
+                        <label for="billing-payment-method">Metodo</label>
+                        <select id="billing-payment-method">
+                          <option value="TRANSFERENCIA">TRANSFERENCIA</option>
+                          <option value="EFECTIVO">EFECTIVO</option>
+                          <option value="TARJETA">TARJETA</option>
+                          <option value="PSE">PSE</option>
+                          <option value="OTRO">OTRO</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label for="billing-payment-reference">Referencia</label>
+                      <input type="text" id="billing-payment-reference" placeholder="Comprobante o folio" />
+                    </div>
+                    <div class="form-actions">
+                      <button type="submit" class="btn btn-primary">Registrar pago</button>
+                    </div>
+                    <div id="billing-payment-msg" class="small-message" hidden></div>
+                  </form>
+                </div>
+
+                <div class="billing-detail-panel">
+                  <div class="list-heading">
+                    <div>
+                      <h3>Checkout Wompi</h3>
+                      <p class="small-text">Prepara el pago online y abre el Web Checkout con los parametros oficiales.</p>
+                    </div>
+                  </div>
+                  <form id="form-billing-checkout">
+                    <div class="form-group">
+                      <label for="billing-checkout-email">Email cliente</label>
+                      <input type="email" id="billing-checkout-email" placeholder="facturacion@cliente.com" />
+                    </div>
+                    <div class="form-group">
+                      <label for="billing-checkout-redirect">Redirect URL</label>
+                      <input type="url" id="billing-checkout-redirect" placeholder="https://tu-dominio.com/retorno" />
+                    </div>
+                    <div class="form-actions">
+                      <button type="submit" class="btn btn-primary">Preparar checkout</button>
+                    </div>
+                    <div id="billing-checkout-msg" class="small-message" hidden></div>
+                  </form>
+                  <div id="billing-checkout-launcher" class="billing-checkout-launcher hidden"></div>
+                </div>
+
+                <div class="billing-detail-panel">
+                  <div class="list-heading">
+                    <div>
+                      <h3>Wompi recurrente</h3>
+                      <p class="small-text">Gestiona fuentes de pago y sincroniza transacciones automaticas.</p>
+                    </div>
+                  </div>
+                  <form id="form-billing-payment-source">
+                    <div class="form-row">
+                      <div class="form-group">
+                        <label for="billing-source-email">Email fuente</label>
+                        <input type="email" id="billing-source-email" placeholder="pagos@cliente.com" />
+                      </div>
+                      <div class="form-group">
+                        <label for="billing-source-type">Tipo</label>
+                        <select id="billing-source-type">
+                          <option value="CARD">CARD</option>
+                          <option value="NEQUI">NEQUI</option>
+                          <option value="DAVIPLATA">DAVIPLATA</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="form-group">
+                      <label for="billing-source-token">Token Wompi</label>
+                      <input type="text" id="billing-source-token" placeholder="tok_test_xxx" />
+                    </div>
+                    <div class="form-actions">
+                      <button type="submit" class="btn btn-secondary">Guardar fuente</button>
+                    </div>
+                    <div id="billing-source-msg" class="small-message" hidden></div>
+                  </form>
+
+                  <form id="form-billing-wompi-sync" class="billing-sync-form">
+                    <div class="form-group">
+                      <label for="billing-sync-transaction">Transaction ID</label>
+                      <input type="text" id="billing-sync-transaction" placeholder="txn_xxx" />
+                    </div>
+                    <div class="form-actions">
+                      <button type="submit" class="btn btn-outline">Sincronizar estado</button>
+                    </div>
+                    <div id="billing-sync-msg" class="small-message" hidden></div>
+                  </form>
+
+                  <form id="form-billing-wompi-sandbox" class="billing-sync-form">
+                    <div class="form-group">
+                      <label for="billing-sandbox-email">Smoke sandbox</label>
+                      <input type="email" id="billing-sandbox-email" placeholder="sandbox@cliente.com" />
+                    </div>
+                    <div class="form-actions">
+                      <button type="submit" class="btn btn-outline">Probar tarjeta sandbox</button>
+                    </div>
+                    <div id="billing-sandbox-msg" class="small-message" hidden></div>
+                  </form>
+                </div>
+              </div>
+
+              <div class="billing-activity-grid">
+                <div class="billing-activity-panel">
+                  <div class="list-heading">
+                    <h3>Intentos</h3>
+                  </div>
+                  <div id="billing-attempts-list" class="billing-activity-list"></div>
+                </div>
+                <div class="billing-activity-panel">
+                  <div class="list-heading">
+                    <h3>Pagos</h3>
+                  </div>
+                  <div id="billing-payments-list" class="billing-activity-list"></div>
+                </div>
+                <div class="billing-activity-panel">
+                  <div class="list-heading">
+                    <h3>Notas credito</h3>
+                  </div>
+                  <div id="billing-credits-list" class="billing-activity-list"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section id="view-config" class="view">
           <div class="cards-grid">
             <div class="card card-full config-tabs-card">
@@ -2577,17 +2996,21 @@
                 </div>
               </div>
               <div class="config-tabs" role="toolbar" aria-label="Secciones de configuración">
-                <button type="button" class="config-tab active" data-config-tab="empresa" aria-pressed="true">
+                <button type="button" class="config-tab active" data-config-tab="empresa" data-tenant-only="true" aria-pressed="true">
                   <span>🏢</span>
                   Empresa
                 </button>
-                <button type="button" class="config-tab" data-config-tab="parqueadero" aria-pressed="false">
+                <button type="button" class="config-tab" data-config-tab="parqueadero" data-tenant-only="true" aria-pressed="false">
                   <span>🅿</span>
                   Parqueadero
                 </button>
-                <button type="button" class="config-tab" data-config-tab="licencias" aria-pressed="false">
+                <button type="button" class="config-tab" data-config-tab="licencias" data-tenant-only="true" aria-pressed="false">
                   <span>🪪</span>
                   Licencias
+                </button>
+                <button type="button" class="config-tab" data-config-tab="sesiones" aria-pressed="false">
+                  <span>🔐</span>
+                  Sesiones
                 </button>
                 <button type="button" class="config-tab" data-config-tab="apariencia" aria-pressed="false">
                   <span>◐</span>
@@ -2597,7 +3020,7 @@
             </div>
 
             <!-- Información de la Empresa -->
-            <div class="card card-full config-panel" data-config-panel="empresa">
+            <div class="card card-full config-panel" data-config-panel="empresa" data-tenant-only="true">
               <div class="config-panel-heading">
                 <div>
                   <span class="eyebrow">Empresa</span>
@@ -2675,7 +3098,7 @@
             </div>
 
             <!-- Configuración Parqueadero -->
-            <div class="card card-full parking-config-card config-panel hidden" data-config-panel="parqueadero">
+            <div class="card card-full parking-config-card config-panel hidden" data-config-panel="parqueadero" data-tenant-only="true">
               <div class="config-panel-heading">
                 <div>
                   <span class="eyebrow">Operación</span>
@@ -2808,6 +3231,38 @@
               </form>
             </div>
 
+            <div class="card card-full config-panel hidden" data-config-panel="sesiones">
+              <div class="config-panel-heading">
+                <div>
+                  <span class="eyebrow">Seguridad</span>
+                  <h3>Sesiones activas</h3>
+                  <p class="small-text">Controla en que dispositivos sigue abierta tu cuenta y cierra accesos que ya no necesites.</p>
+                </div>
+                <span id="session-current-badge" class="badge badge-primary">Sesion actual</span>
+              </div>
+
+              <div class="session-toolbar">
+                <div class="session-toolbar-copy">
+                  <strong>Actividad reciente</strong>
+                  <span class="small-text">La renovacion del token y el cierre remoto se reflejan aqui.</span>
+                </div>
+                <div class="session-toolbar-actions">
+                  <button id="btn-refresh-sesiones" type="button" class="btn btn-outline">Actualizar</button>
+                  <button id="btn-logout-all-sesiones" type="button" class="btn btn-secondary">Cerrar todas</button>
+                </div>
+              </div>
+
+              <div id="sesiones-lista" class="session-list">
+                <div class="session-empty-state">
+                  <strong>Cargando sesiones...</strong>
+                  <span>Consultando dispositivos y actividad reciente.</span>
+                </div>
+              </div>
+
+              <div id="sesiones-error" class="error-message" hidden></div>
+              <div id="sesiones-success" class="success-message" hidden></div>
+            </div>
+
             <div class="card card-full config-panel hidden" data-config-panel="apariencia">
               <div class="config-panel-heading">
                 <div>
@@ -2832,7 +3287,7 @@
             </div>
 
             <!-- Licencia Actual -->
-            <div class="card card-full config-panel hidden license-plan-card" data-config-panel="licencias">
+            <div class="card card-full config-panel hidden license-plan-card" data-config-panel="licencias" data-tenant-only="true">
               <div class="license-plan-hero">
                 <div>
                   <span class="eyebrow">Plan actual</span>
@@ -2894,7 +3349,7 @@
             </div>
 
             <!-- Gestión de Licencias (Solo Admin) -->
-            <div id="admin-licencias" class="card card-full config-panel hidden" data-config-panel="licencias" data-admin-only="true">
+            <div id="admin-licencias" class="card card-full config-panel hidden" data-config-panel="licencias" data-admin-only="true" data-tenant-only="true">
               <h3>Gestión de Licencias</h3>
               <div class="form-row">
                 <button id="btn-ver-licencias" class="btn btn-outline">Ver Todas las Licencias</button>
