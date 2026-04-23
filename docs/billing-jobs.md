@@ -65,6 +65,32 @@ Variables opcionales:
 - `BILLING_JOBS_GRACE_DAYS`
 - `BILLING_JOBS_INVOICE_DUE_DAYS`
 - `BILLING_JOBS_LIMIT`
+- `BILLING_JOBS_LOCK_FILE`
+- `BILLING_JOBS_LOG_FILE`
+
+Ejecución real corta:
+
+```bash
+npm run billing:jobs:run
+```
+
+## Lock y logs
+
+El script usa lock por archivo para evitar ejecuciones simultáneas.
+
+Valor por defecto:
+
+```text
+tmp/billing-jobs.lock
+```
+
+Si el lock ya existe, el script devuelve `SKIPPED` y no modifica datos.
+
+Si `BILLING_JOBS_LOG_FILE` está configurado, el script escribe una línea JSON por ejecución. Recomendado:
+
+```text
+logs/billing-jobs.jsonl
+```
 
 ## Flujo recomendado en producción
 
@@ -76,6 +102,39 @@ Cadencia sugerida inicial:
 
 - diario a las 02:00 para vencimientos y renovaciones
 - mantener `limit` conservador al inicio
+
+## PM2
+
+Archivo listo:
+
+```text
+deploy/pm2/ecosystem.billing.config.cjs
+```
+
+Instalación en servidor:
+
+```bash
+pm2 start deploy/pm2/ecosystem.billing.config.cjs
+pm2 save
+```
+
+El job queda programado todos los días a las 02:00.
+
+## Cron
+
+Archivo base:
+
+```text
+deploy/cron/autogestion360-billing-jobs.cron
+```
+
+Antes de instalarlo, ajusta `AUTO360_DIR` al path real del servidor.
+
+Instalación sugerida:
+
+```bash
+crontab deploy/cron/autogestion360-billing-jobs.cron
+```
 
 ## Reglas de idempotencia
 

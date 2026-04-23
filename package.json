@@ -8,7 +8,8 @@
     "dev": "nodemon server.js",
     "promote:superadmin": "node scripts/promote-superadmin.js",
     "smoke:wompi": "node scripts/smoke-wompi-sandbox.js",
-    "billing:jobs": "node scripts/run-billing-jobs.js"
+    "billing:jobs": "node scripts/run-billing-jobs.js",
+    "billing:jobs:run": "BILLING_JOBS_DRY_RUN=false node scripts/run-billing-jobs.js"
   },
   "author": "Victor Alfonso Mena Cordoba",
   "license": "ISC",

@@ -1,0 +1,6 @@
+# AutoGestion360 billing jobs
+# Ajusta AUTO360_DIR al path real del proyecto en el servidor.
+SHELL=/bin/bash
+AUTO360_DIR=/opt/autogestion360
+
+0 2 * * * cd "$AUTO360_DIR" && BILLING_JOBS_DRY_RUN=false npm run billing:jobs >> logs/billing-jobs.cron.log 2>&1
