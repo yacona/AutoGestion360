@@ -6,6 +6,7 @@ const ctrl = require('./billing.controller');
 const validate = require('../../middlewares/validate');
 const { adminMutationLimiter } = require('../../lib/security/rate-limit');
 const {
+  billingJobsOptionsSchema,
   createCreditNoteBodySchema,
   createInvoiceBodySchema,
   createPaymentAttemptBodySchema,
@@ -19,6 +20,7 @@ const {
   listInvoicesQuerySchema,
   listWebhooksQuerySchema,
   paymentSourceIdParamSchema,
+  previewBillingJobsQuerySchema,
   registerManualPaymentBodySchema,
   setDefaultWompiSourceBodySchema,
   syncWompiTransactionBodySchema,
@@ -31,6 +33,8 @@ const router = express.Router();
 
 router.use(ctrl.requirePlatformBillingAdmin);
 
+router.get('/jobs/preview', validate({ query: previewBillingJobsQuerySchema }), ctrl.previewJobs);
+router.post('/jobs/run', adminMutationLimiter, validate({ body: billingJobsOptionsSchema }), ctrl.runJobs);
 router.get('/providers/wompi/merchant', validate({ query: getWompiMerchantQuerySchema }), ctrl.getWompiMerchant);
 router.get('/invoices', validate({ query: listInvoicesQuerySchema }), ctrl.listarFacturas);
 router.get('/invoices/:invoiceId', validate({ params: invoiceIdParamSchema }), ctrl.obtenerFactura);

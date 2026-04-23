@@ -1,6 +1,7 @@
 'use strict';
 
 const service = require('./billing.service');
+const billingJobs = require('./billing.jobs');
 const wompiService = require('./providers/wompi.service');
 const {
   recordSecurityEventSafe,
@@ -111,6 +112,24 @@ const listarWebhooks = wrap(async (req, res) => {
   res.json(events);
 });
 
+const previewJobs = wrap(async (req, res) => {
+  const result = await billingJobs.runBillingJobs({
+    ...req.query,
+    dry_run: true,
+  }, req.user);
+  res.json(result);
+});
+
+const runJobs = wrap(async (req, res) => {
+  const result = await billingJobs.runBillingJobs(req.body, req.user);
+  res.json({
+    mensaje: result.dry_run
+      ? 'Preview de jobs de billing ejecutado.'
+      : 'Jobs de billing ejecutados.',
+    ...result,
+  });
+});
+
 const getWompiMerchant = wrap(async (req, res) => {
   const merchant = await wompiService.getMerchantInfo({
     forceRefresh: req.query.force_refresh === true,
@@ -199,9 +218,11 @@ module.exports = {
   listarWebhooks,
   listarWompiPaymentSources,
   obtenerFactura,
+  previewJobs,
   recibirWebhook,
   registrarPagoManual,
   requirePlatformBillingAdmin,
+  runJobs,
   setDefaultWompiPaymentSource,
   syncWompiTransaction,
 };

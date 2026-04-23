@@ -62,6 +62,11 @@ const paymentMethodSchema = z.enum([
 const creditNoteStatusSchema = z.enum(['DRAFT', 'ISSUED', 'APPLIED', 'VOID']);
 
 const webhookStatusSchema = z.enum(['RECEIVED', 'PROCESSED', 'IGNORED', 'FAILED']);
+const billingJobCodeSchema = z.enum([
+  'MARK_OVERDUE_INVOICES',
+  'GENERATE_RENEWAL_INVOICES',
+  'EXPIRE_SUBSCRIPTIONS',
+]);
 
 const invoiceIdParamSchema = z.object({
   invoiceId: positiveIntFromUnknown,
@@ -184,6 +189,24 @@ const listWebhooksQuerySchema = z.object({
   limit: optionalPositiveIntFromUnknown,
 });
 
+const billingJobsOptionsSchema = z.object({
+  dry_run: optionalBooleanFromUnknown,
+  as_of: nullableDateString.optional(),
+  days_ahead: optionalPositiveIntFromUnknown,
+  grace_days: optionalPositiveIntFromUnknown,
+  invoice_due_days: optionalPositiveIntFromUnknown,
+  limit: optionalPositiveIntFromUnknown,
+  jobs: z.array(billingJobCodeSchema).optional(),
+});
+
+const previewBillingJobsQuerySchema = z.object({
+  as_of: nullableDateString.optional(),
+  days_ahead: optionalPositiveIntFromUnknown,
+  grace_days: optionalPositiveIntFromUnknown,
+  invoice_due_days: optionalPositiveIntFromUnknown,
+  limit: optionalPositiveIntFromUnknown,
+});
+
 const getWompiMerchantQuerySchema = z.object({
   force_refresh: optionalBooleanFromUnknown,
 });
@@ -257,9 +280,11 @@ module.exports = {
   createWompiTransactionBodySchema,
   invoiceIdParamSchema,
   getWompiMerchantQuerySchema,
+  billingJobsOptionsSchema,
   listInvoicesQuerySchema,
   listWebhooksQuerySchema,
   paymentSourceIdParamSchema,
+  previewBillingJobsQuerySchema,
   providerParamSchema,
   registerManualPaymentBodySchema,
   setDefaultWompiSourceBodySchema,
